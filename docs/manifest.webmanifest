@@ -1,0 +1,13 @@
+{
+  "name": "Toko Imanuel",
+  "short_name": "Toko Imanuel",
+  "start_url": "./#/beranda",
+  "display": "standalone",
+  "background_color": "#F5F5F9",
+  "theme_color": "#262F78",
+  "lang": "id",
+  "icons": [
+    { "src": "img/ikon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "img/ikon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

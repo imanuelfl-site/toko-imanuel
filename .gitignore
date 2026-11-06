@@ -1,0 +1,17 @@
+# Data keuangan asli: JANGAN masuk GitHub (repo publik)
+data-lama/
+data-keluaran/
+
+# Skrip konversi berisi nama keluarga dan nomor pelanggan
+tools/*
+!tools/serve.js
+!tools/bangun-gs.js
+
+# Contoh tampilan (memuat sebagian angka asli)
+mockup/
+
+.claude/
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
