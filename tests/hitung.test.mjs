@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { ringkasBulan, saldoDompet, hargaSaran, hargaJagaUntung, statusTagihan, geserBulan, akhirBulan, cariBarang, indeks } from "../docs/js/hitung.js";
+import { ringkasBulan, saldoDompet, hargaIkutModal, lapisan, isiTotal, kolomLapisan, teksLapisan, satukanNama, statusTagihan, geserBulan, akhirBulan, cariBarang, indeks } from "../docs/js/hitung.js";
 
 const dompet = [
   { id: "cash", pemilik: "toko" }, { id: "sea", pemilik: "toko" }, { id: "fp", pemilik: "toko" }, { id: "bca", pemilik: "pribadi" }
@@ -70,11 +70,37 @@ test("identitas berlaku pada data hasil konversi", { skip: !fs.existsSync(new UR
   assert.equal(Math.round(total), Math.round(saldoToko));
 });
 
-test("harga saran dan jaga untung", () => {
-  assert.equal(hargaSaran(310000, 30), 403000);
-  assert.equal(hargaSaran(3500, 50), 5500);
-  assert.equal(hargaJagaUntung(6500, 9000, 7000), 10000);
-  assert.equal(hargaSaran(0, 30), 0);
+test("harga ikut modal", () => {
+  assert.equal(hargaIkutModal(6500, 9000, 7000), 9500);
+  assert.equal(hargaIkutModal(6500, 9000, 7100), 10000, "dibulatkan ke atas Rp500");
+  assert.equal(hargaIkutModal(6500, "", 7000), 0, "tanpa harga jual lama tidak ada saran");
+});
+
+test("satuan berlapis", () => {
+  const L = lapisan({ satuan_beli: "dus", satuan_2: "pak", isi_2: 10, satuan_3: "pcs", isi_3: 12 });
+  assert.deepEqual(L.map(l => l.satuan), ["dus", "pak", "pcs"]);
+  assert.equal(isiTotal(L), 120);
+  assert.equal(teksLapisan(L), "1 dus = 10 pak = 120 pcs");
+  const k = kolomLapisan(L);
+  assert.equal(k.satuan_jual, "pcs"); assert.equal(k.isi, 120); assert.equal(k.satuan_4, ""); assert.equal(k.isi_4, "");
+  // data lama: satuan beli + isi total
+  const lama = lapisan({ satuan_beli: "lsn", satuan_jual: "pcs", isi: 12 });
+  assert.deepEqual(lama, [{ satuan: "lsn", isi: 1 }, { satuan: "pcs", isi: 12 }]);
+  assert.equal(isiTotal(lapisan({ satuan_beli: "bh", satuan_jual: "bh", isi: 1 })), 1);
+  assert.deepEqual(lapisan({ satuan_beli: "krt", satuan_jual: "krt", isi: 24 }).map(l => l.satuan), ["krt", "pcs"]);
+});
+
+test("nama kembar tampil sekali", () => {
+  const b = [
+    { id: "1", nama: "Toples neo 5,5L", terakhir_beli: "2025-06-11", harga_jual: "" },
+    { id: "2", nama: "toples neo 5.5L", terakhir_beli: "2021-12-13", harga_jual: 25000 },
+    { id: "3", nama: "Toples neo 10,5L", terakhir_beli: "2025-06-11" }
+  ];
+  const s = satukanNama(b);
+  assert.equal(s.length, 2);
+  const neo = s.find(x => x._kembar.length === 2);
+  assert.equal(neo.id, "1", "yang paling baru dibeli");
+  assert.deepEqual(neo._kembar.sort(), ["1", "2"]);
 });
 
 test("bulan dan tagihan", () => {

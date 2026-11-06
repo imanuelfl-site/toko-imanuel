@@ -77,9 +77,14 @@ Lupa password? Ketik password baru lagi di kolom **password_baru**, lalu masuk d
 Kalau Claude mengubah `apps-script/Code.gs`:
 
 1. Buka Apps Script, ganti isi `Code.gs` dengan versi baru, Simpan.
-2. **Terapkan → Kelola deployment → ikon pensil → Versi: Versi baru → Terapkan**.
+2. **Hanya sekali, untuk foto barang:** di bilah atas editor, pilih fungsi `izinkanFoto` lalu klik **Jalankan**. Google meminta izin baru untuk Google Drive. Pilih akun Anda → **Lanjutan → Buka Toko Imanuel (tidak aman)** → **Izinkan**. Folder **Toko Imanuel - Foto barang** akan muncul di Google Drive Anda.
+3. **Terapkan → Kelola deployment → ikon pensil → Versi: Versi baru → Terapkan**.
 
 Alamat `/exec` tetap sama, jadi web tidak perlu diubah.
+
+Foto barang disimpan di folder Drive tadi dengan akses "siapa saja yang punya tautan bisa melihat", supaya bisa tampil di web. Hanya foto barang yang ada di sana, bukan data keuangan. Jangan hapus atau pindahkan folder itu.
+
+Kolom baru di tab `barang` (satuan_2, isi_2, … , foto) ditambahkan otomatis oleh server saat pertama kali menyimpan barang. Kolom lama `kelompok` dan tab `kelompok` tidak dipakai lagi dan boleh dibiarkan.
 
 ## Mencoba di komputer tanpa server
 

@@ -24,6 +24,7 @@ function tiruanGoogle(awal) {
     deleteRow: r => sheets[n].splice(r - 1, 1)
   });
   const props = {};
+  const drive = { folder: [], file: [] };
   const b64 = buf => Buffer.from(buf).toString("base64");
   const g = {
     SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: n => (sheets[n] ? sheet(n) : null), insertSheet: n => { sheets[n] = []; return sheet(n); } }), flush() {} },
@@ -32,6 +33,11 @@ function tiruanGoogle(awal) {
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => (props[k] = v) }) },
     Session: { getScriptTimeZone: () => "Asia/Jayapura" },
     Logger: { log() {} },
+    DriveApp: {
+      Access: { ANYONE_WITH_LINK: "link" }, Permission: { VIEW: "view" },
+      createFolder: nama => { const f = { id: "F" + drive.folder.length, nama, getId() { return this.id; }, isTrashed: () => false, getUrl: () => "url", createFile: blob => { const file = { id: "D" + drive.file.length, blob, getId() { return this.id; }, setSharing(a, p) { file.berbagi = a + ":" + p; } }; drive.file.push(file); return file; } }; drive.folder.push(f); return f; },
+      getFolderById: id => drive.folder.find(f => f.id === id)
+    },
     Utilities: {
       getUuid: () => crypto.randomUUID(),
       DigestAlgorithm: { SHA_256: "sha256" }, Charset: { UTF_8: "utf8" },
@@ -40,20 +46,21 @@ function tiruanGoogle(awal) {
       base64Encode: b => b64(Buffer.from(b.map ? b.map(x => x & 255) : b)),
       base64EncodeWebSafe: b => Buffer.from(typeof b === "string" ? Buffer.from(b) : b.map(x => x & 255)).toString("base64url"),
       base64DecodeWebSafe: s => [...Buffer.from(s, "base64url")],
-      newBlob: bytes => ({ getDataAsString: () => Buffer.from(bytes).toString("utf8") }),
+      newBlob: (bytes, mime, nama) => ({ mime, nama, ukuran: bytes.length, getDataAsString: () => Buffer.from(bytes).toString("utf8") }),
+      base64Decode: s => [...Buffer.from(s, "base64")],
       formatDate: (d, tz, f) => f.includes("HH") ? d.toISOString().slice(0, 19) : d.toISOString().slice(0, 10),
       sleep() {}
     }
   };
-  return { g, sheets };
+  return { g, sheets, drive };
 }
 
 function muatServer(awal) {
-  const { g, sheets } = tiruanGoogle(awal);
+  const { g, sheets, drive } = tiruanGoogle(awal);
   const ctx = vm.createContext({ ...g, console, Date, JSON, Math, String, Object, Number });
   vm.runInContext(fs.readFileSync(new URL("../apps-script/Code.gs", import.meta.url), "utf8"), ctx);
   const post = body => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }));
-  return { post, sheets };
+  return { post, sheets, drive };
 }
 
 const awal = () => ({
@@ -103,4 +110,36 @@ test("ubah password", () => {
   assert.equal(post({ aksi: "ubahPassword", token: l.token, data: { lama: "rahasia-uji", baru: "baru123" } }).ok, true);
   assert.equal(post({ aksi: "login", data: { username: "imanuel", password: "baru123" } }).ok, true);
   assert.equal(post({ aksi: "login", data: { username: "imanuel", password: "rahasia-uji" } }).ok, false);
+});
+
+test("unggah foto ke Drive", () => {
+  const { post, drive } = muatServer(awal());
+  assert.equal(post({ aksi: "unggahFoto", token: "palsu", data: { data: "eA==" } }).kode, "sesi", "harus login");
+  const l = post({ aksi: "login", data: { username: "imanuel", password: "rahasia-uji" } });
+  const data = Buffer.from("gambar-palsu").toString("base64");
+  const r1 = post({ aksi: "unggahFoto", token: l.token, data: { nama: "Kompor HOCK 16/2", mime: "image/jpeg", data } });
+  assert.equal(r1.ok, true, r1.pesan);
+  const r2 = post({ aksi: "unggahFoto", token: l.token, data: { nama: "Panci", mime: "text/html", data } });
+  assert.equal(drive.folder.length, 1, "satu folder dipakai ulang");
+  assert.equal(drive.file.length, 2);
+  assert.equal(drive.file[0].getId(), r1.id);
+  assert.equal(drive.file[0].blob.nama, "Kompor HOCK 16 2.jpg", "nama file aman");
+  assert.equal(drive.file[1].blob.mime, "image/jpeg", "mime selain gambar diganti");
+  assert.equal(drive.file[0].berbagi, "link:view");
+  assert.equal(post({ aksi: "unggahFoto", token: l.token, data: {} }).ok, false, "foto kosong ditolak");
+  assert.ok(r2.ok);
+});
+
+test("kolom baru barang ditambahkan ke sheet lama", () => {
+  const db = awal();
+  db.barang = [["id", "nama", "kelompok", "supplier", "satuan_jual", "satuan_beli", "isi", "modal", "harga_jual", "harga_diubah", "terakhir_beli", "aktif"], ["B1", "Termos", "perabot", "cm", "bh", "bh", 1, 50000, "", "", "", true]];
+  const { post, sheets } = muatServer(db);
+  const l = post({ aksi: "login", data: { username: "imanuel", password: "rahasia-uji" } });
+  const r = post({ aksi: "batch", token: l.token, data: { ops: [{ tabel: "barang", simpan: { id: "B1", satuan_beli: "dus", satuan_2: "pcs", isi_2: 12, isi: 12, satuan_jual: "pcs", foto: "D9" } }] } });
+  assert.equal(r.ok, true, r.pesan);
+  const kepala = sheets.barang[0];
+  for (const k of ["satuan_2", "isi_2", "satuan_3", "foto"]) assert.ok(kepala.includes(k), "kolom " + k);
+  const b = post({ aksi: "muat", token: l.token }).data.barang[0];
+  assert.equal(b.nama, "Termos"); assert.equal(b.kelompok, "perabot", "kolom lama tetap");
+  assert.equal(b.satuan_2, "pcs"); assert.equal(b.isi_2, "12"); assert.equal(b.foto, "D9");
 });

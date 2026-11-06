@@ -1,5 +1,5 @@
 // Semua hitungan sistem (tanpa tampilan). Bisa diuji di Node.
-// state: { kategori, dompet, transaksi, tagihan, barang, kelompok, ... } (larik baris dari database)
+// state: { kategori, dompet, transaksi, tagihan, barang, ... } (larik baris dari database)
 
 export const bulanIni = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 export const hariIni = (d = new Date()) => `${bulanIni(d)}-${String(d.getDate()).padStart(2, "0")}`;
@@ -106,27 +106,62 @@ export function statusTagihan(state, bulan, hari = hariIni()) {
   }).sort((a, b) => (angka(a.tgl) || 99) - (angka(b.tgl) || 99));
 }
 
-// Harga jual saran: modal + markup kelompok, dibulatkan ke atas.
-export function hargaSaran(modal, markup, bulat = 500) {
-  const m = angka(modal);
-  if (!m) return 0;
-  return Math.ceil((m * (1 + angka(markup) / 100)) / bulat) * bulat;
-}
 export const untungPersen = (modal, jual) => { const m = angka(modal), j = angka(jual); return m > 0 && j > 0 ? Math.round(((j - m) / m) * 100) : null; };
 
-// Harga jual baru yang menjaga persen untung lama saat modal naik.
-export function hargaJagaUntung(modalLama, jualLama, modalBaru, bulat = 500) {
-  const p = untungPersen(modalLama, jualLama);
-  if (p === null) return 0;
-  return Math.ceil((angka(modalBaru) * (1 + p / 100)) / bulat) * bulat;
+// Modal naik: harga jual lama ditambah kenaikan modal (untung rupiah tetap), dibulatkan ke atas.
+export function hargaIkutModal(modalLama, jualLama, modalBaru, bulat = 500) {
+  const j = angka(jualLama);
+  if (!j) return 0;
+  return Math.ceil((j + angka(modalBaru) - angka(modalLama)) / bulat) * bulat;
 }
 
-// Cari barang: semua kata harus ada di nama (tanpa beda huruf besar/kecil).
+// Satuan berlapis, misalnya dus > pak > pcs. Lapis pertama = satuan beli, lapis terakhir = satuan jual.
+// Hasil: [{ satuan, isi }] dengan isi = jumlah lapis ini di dalam satu lapis sebelumnya (lapis pertama isi 1).
+export function lapisan(b) {
+  const L = [{ satuan: String(b.satuan_beli || b.satuan_jual || "bh").trim(), isi: 1 }];
+  for (const k of [2, 3, 4]) {
+    const s = String(b["satuan_" + k] || "").trim();
+    if (!s) break;
+    L.push({ satuan: s, isi: angka(b["isi_" + k]) || 1 });
+  }
+  // Data lama: hanya ada satuan beli + isi total (mis. lsn isi 12 pcs)
+  if (L.length === 1 && angka(b.isi) > 1) L.push({ satuan: String(b.satuan_jual && b.satuan_jual !== b.satuan_beli ? b.satuan_jual : "pcs"), isi: angka(b.isi) });
+  return L;
+}
+export const isiTotal = L => L.reduce((p, l, i) => (i ? p * (angka(l.isi) || 1) : p), 1);
+export function kolomLapisan(L) {
+  const o = { satuan_beli: L[0].satuan, satuan_jual: L[L.length - 1].satuan, isi: isiTotal(L) };
+  for (const k of [2, 3, 4]) { const l = L[k - 1]; o["satuan_" + k] = l ? l.satuan : ""; o["isi_" + k] = l ? l.isi : ""; }
+  return o;
+}
+// "1 dus = 10 pak = 120 pcs"
+export function teksLapisan(L) {
+  if (L.length < 2) return "";
+  let n = 1;
+  return [`1 ${L[0].satuan}`, ...L.slice(1).map(l => `${(n *= angka(l.isi) || 1)} ${l.satuan}`)].join(" = ");
+}
+
+// Nama sama (beda huruf besar, spasi, atau tanda baca) dianggap satu barang.
+export const kunciNama = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// Tampilkan sekali per nama: yang paling baru dibeli (yang punya harga jual didahulukan bila sama).
+// Setiap hasil membawa _kembar: semua id barang dengan nama itu.
+export function satukanNama(barang) {
+  const m = new Map();
+  const lebihBaik = (x, y) => String(x.terakhir_beli || "") > String(y.terakhir_beli || "") || (String(x.terakhir_beli || "") === String(y.terakhir_beli || "") && angka(x.harga_jual) > 0 && !(angka(y.harga_jual) > 0));
+  for (const b of barang) {
+    const k = kunciNama(b.nama), a = m.get(k);
+    if (!a) m.set(k, { ...b, _kembar: [b.id] });
+    else { const kembar = [...a._kembar, b.id]; m.set(k, lebihBaik(b, a) ? { ...b, _kembar: kembar } : { ...a, _kembar: kembar }); }
+  }
+  return [...m.values()];
+}
+
+// Cari barang: semua kata harus ada di nama (tanpa beda huruf besar/kecil). Nama kembar tampil sekali.
 export function cariBarang(barang, q, batas = 60) {
-  const kata = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
-  const hasil = barang.filter(b => b.aktif !== false && b.aktif !== "FALSE").filter(b => { const n = String(b.nama).toLowerCase(); return kata.every(k => n.includes(k)); });
+  const kata = kunciNama(q).split(" ").filter(Boolean);
+  const hasil = satukanNama(barang.filter(b => b.aktif !== false && b.aktif !== "FALSE")).filter(b => { const n = kunciNama(b.nama); return kata.every(k => n.includes(k)); });
   const awal = kata[0] || "";
-  hasil.sort((a, b) => { const sa = String(a.nama).toLowerCase().startsWith(awal) ? 0 : 1, sb = String(b.nama).toLowerCase().startsWith(awal) ? 0 : 1; return sa - sb || String(a.nama).localeCompare(String(b.nama)); });
+  hasil.sort((a, b) => { const sa = kunciNama(a.nama).startsWith(awal) ? 0 : 1, sb = kunciNama(b.nama).startsWith(awal) ? 0 : 1; return sa - sb || String(a.nama).localeCompare(String(b.nama)); });
   return hasil.slice(0, batas);
 }
 

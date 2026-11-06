@@ -1,6 +1,6 @@
 // Alat bantu tampilan.
 import { S, kat, dom } from "./data.js";
-import { angka } from "./hitung.js";
+import { angka, isiTotal, teksLapisan } from "./hitung.js";
 
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const titik = n => Math.round(Math.abs(angka(n))).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
@@ -119,4 +119,102 @@ export function kartuTransaksi(t, { tampilOleh = true, namaPengguna = u => u } =
     <span class="k">${esc(k.nama)} · ${esc(dompetTeks)}${tampilOleh && t.oleh ? ` · oleh ${esc(namaPengguna(t.oleh))}` : ""}</span>
     <span class="k">${prive ? '<span class="st warn">pribadi dari toko</span>' : ""}</span>
   </a>`;
+}
+
+// ---------- Foto barang ----------
+// Kolom foto berisi ID file Google Drive (atau data: URL di mode demo).
+export const fotoUrl = (f, lebar = 320) => !f ? "" : /^(data:|https?:)/.test(f) ? f : `https://drive.google.com/thumbnail?id=${encodeURIComponent(f)}&sz=w${lebar}`;
+
+// Perkecil foto dari kamera/galeri sebelum diunggah (sisi terpanjang maks 900px, JPEG).
+export function kecilkanFoto(file, maks = 900, mutu = 0.78) {
+  return new Promise((res, rej) => {
+    if (!file || !String(file.type).startsWith("image/")) return rej(new Error("Pilih file gambar."));
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, maks / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      const dataUrl = c.toDataURL("image/jpeg", mutu);
+      res({ mime: "image/jpeg", data: dataUrl.split(",")[1], url: dataUrl });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("Gambar tidak terbaca.")); };
+    img.src = url;
+  });
+}
+
+// Kotak foto + tombol ambil/ganti. Pasang dengan pasangFoto(el, onPilih).
+export function htmlFoto(src, label = "Foto barang") {
+  return `<div class="foto-isian" data-foto-box>
+    <span class="foto-kecil ${src ? "" : "kosong"}">${src ? `<img src="${esc(src)}" alt="" loading="lazy">` : "📷"}</span>
+    <span class="small"><b>${esc(label)}</b><br><span class="muted tiny" data-foto-ket>${src ? "ketuk foto untuk memperbesar" : "belum ada foto"}</span></span>
+    <label class="tombol garis kecil">${src ? "Ganti" : "Ambil foto"}<input type="file" accept="image/*" hidden data-foto-file></label>
+  </div>`;
+}
+export function pasangFoto(root, onPilih) {
+  const box = root.querySelector("[data-foto-box]"); if (!box) return;
+  box.querySelector("[data-foto-file]").onchange = async e => {
+    const file = e.target.files[0]; if (!file) return;
+    const ket = box.querySelector("[data-foto-ket]"); ket.textContent = "memproses…";
+    try {
+      const f = await kecilkanFoto(file);
+      box.querySelector(".foto-kecil").classList.remove("kosong");
+      box.querySelector(".foto-kecil").innerHTML = `<img src="${f.url}" alt="">`;
+      box.querySelector("label.tombol").firstChild.textContent = "Ganti";
+      ket.textContent = "foto baru, tersimpan saat Simpan";
+      onPilih(f);
+    } catch (err) { ket.textContent = err.message; }
+    e.target.value = "";
+  };
+  box.querySelector(".foto-kecil").onclick = () => { const i = box.querySelector(".foto-kecil img"); if (i) lihatFoto(i.src.replace(/sz=w[0-9]+/, "sz=w1200")); };
+}
+export function lihatFoto(src, judul = "") {
+  const d = document.createElement("dialog");
+  d.className = "foto-besar";
+  d.innerHTML = `<img src="${esc(src)}" alt="${esc(judul)}"><div class="baris"><span class="small">${esc(judul)}</span><button class="tombol garis kecil">Tutup</button></div>`;
+  document.body.appendChild(d);
+  d.onclick = () => { d.close(); d.remove(); };
+  d.addEventListener("cancel", () => d.remove());
+  d.showModal();
+}
+
+// ---------- Satuan berlapis ----------
+// Satuan-1 = satuan saat membeli (dus, krt, lsn, bh). Satuan-2..4 = isi di dalamnya. Dijual per satuan terakhir.
+export const DAFTAR_SATUAN = '<datalist id="daftar-satuan">' + ["bh", "pcs", "dus", "krt", "box", "pak", "lsn", "bks", "set", "roll", "tabung", "kg", "karung", "gross", "kodi", "toples", "sachet", "renteng"].map(s => `<option value="${s}">`).join("") + "</datalist>";
+
+export function htmlLapisan(L, { jumlah } = {}) {
+  const sat = k => (L[k - 1] ? L[k - 1].satuan : "");
+  const isi = k => (L[k - 1] ? L[k - 1].isi : "");
+  return `<div class="lapis" data-lapis>
+    <div class="g2">${jumlah !== undefined ? `<div class="isian"><label>Jumlah</label><input class="input" data-f="qty" inputmode="decimal" value="${jumlah || ""}"></div>` : ""}
+      <div class="isian"><label>Satuan-1 <span class="muted">(waktu beli)</span></label><input class="input" data-sat="1" value="${esc(sat(1))}" list="daftar-satuan" placeholder="dus / krt / bh" autocomplete="off"></div></div>
+    ${[2, 3, 4].map(k => `<div class="lapis-baris" data-k="${k}"><span class="small">1 <b data-nm>${esc(sat(k - 1) || "…")}</b> isi</span><input class="input" data-isi="${k}" inputmode="numeric" value="${isi(k)}" placeholder="isi"><input class="input" data-sat="${k}" value="${esc(sat(k))}" list="daftar-satuan" placeholder="satuan-${k}" autocomplete="off"></div>`).join("")}
+    <div class="tiny muted" data-ringkas></div>
+  </div>`;
+}
+export function bacaLapisan(el) {
+  const L = [{ satuan: el.querySelector('[data-sat="1"]').value.trim() || "bh", isi: 1 }];
+  for (const k of [2, 3, 4]) {
+    const s = el.querySelector(`[data-sat="${k}"]`).value.trim();
+    if (!s) break;
+    L.push({ satuan: s, isi: angka(el.querySelector(`[data-isi="${k}"]`).value) || 1 });
+  }
+  return L;
+}
+// Tampilkan baris satuan berikutnya hanya kalau satuan sebelumnya terisi; perbarui ringkasan.
+export function segarkanLapisan(el, jumlah) {
+  let tampil = true;
+  for (const k of [2, 3, 4]) {
+    const atas = el.querySelector(`[data-sat="${k - 1}"]`).value.trim();
+    if (k > 2) tampil = tampil && !!atas;
+    const row = el.querySelector(`[data-k="${k}"]`);
+    row.classList.toggle("hidden", !tampil);
+    row.querySelector("[data-nm]").textContent = atas || "…";
+  }
+  const L = bacaLapisan(el), akhir = L[L.length - 1].satuan, total = isiTotal(L);
+  el.querySelector("[data-ringkas]").textContent = L.length > 1
+    ? `${teksLapisan(L)} · dijual per ${akhir}${jumlah ? ` · total ${titik(jumlah * total)} ${akhir}` : ""}`
+    : `Dijual per ${akhir}. Kalau isinya berlapis, isi baris di bawah satuan-1.`;
+  return L;
 }

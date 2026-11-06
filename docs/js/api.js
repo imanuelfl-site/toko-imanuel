@@ -34,7 +34,8 @@ export const api = {
   login: (username, password) => panggil("login", { username, password }),
   muat: () => panggil("muat", {}),
   batch: ops => panggil("batch", { ops }),
-  ubahPassword: (lama, baru) => panggil("ubahPassword", { lama, baru })
+  ubahPassword: (lama, baru) => panggil("ubahPassword", { lama, baru }),
+  unggahFoto: d => panggil("unggahFoto", d)
 };
 
 export function cacheData(data) { simpanLokal("toko-cache", data ? JSON.stringify(data) : null); }
@@ -74,5 +75,6 @@ async function demo(aksi, data) {
     return { ok: true };
   }
   if (aksi === "ubahPassword") return { ok: true };
+  if (aksi === "unggahFoto") return { ok: true, id: `data:${data.mime};base64,${data.data}` };
   return { ok: false, pesan: "aksi demo tidak dikenal" };
 }

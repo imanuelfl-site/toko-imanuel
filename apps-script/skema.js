@@ -4,9 +4,10 @@ var SKEMA = {
   pengguna: ["username", "nama", "password_baru", "salt", "hash", "aktif"],
   kategori: ["id", "nama", "jenis", "pos", "peran", "aktif", "urutan"],
   dompet: ["id", "nama", "pemilik", "tipe", "aktif", "urutan"],
-  kelompok: ["id", "nama", "markup", "urutan"],
-  supplier: ["id", "nama", "kelompok", "aktif", "urutan"],
-  barang: ["id", "nama", "kelompok", "supplier", "satuan_jual", "satuan_beli", "isi", "modal", "harga_jual", "harga_diubah", "terakhir_beli", "aktif"],
+  supplier: ["id", "nama", "aktif", "urutan"],
+  // Satuan berlapis: satuan_beli (satuan-1) > satuan_2 > satuan_3 > satuan_4, isi_k = isi satu lapis di atasnya.
+  // satuan_jual = lapis terakhir, isi = total satuan jual dalam satu satuan beli, modal per satuan jual.
+  barang: ["id", "nama", "supplier", "satuan_beli", "isi_2", "satuan_2", "isi_3", "satuan_3", "isi_4", "satuan_4", "satuan_jual", "isi", "modal", "harga_jual", "harga_diubah", "terakhir_beli", "foto", "aktif"],
   nota: ["id", "tanggal", "supplier", "dompet", "total", "transaksi", "sumber", "catatan", "oleh", "dibuat"],
   nota_item: ["id", "nota", "barang", "nama", "qty", "satuan", "isi", "harga", "total", "modal"],
   transaksi: ["id", "tanggal", "jenis", "kategori", "dompet", "dompet_tujuan", "nominal", "keterangan", "perjalanan", "tagihan", "nota", "sumber", "catatan", "oleh", "dibuat", "diubah", "hapus", "asal"],

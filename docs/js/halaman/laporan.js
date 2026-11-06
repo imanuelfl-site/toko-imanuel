@@ -16,7 +16,7 @@ export function menu(main) {
       ${item("buku-kas", "Buku kas", "Semua catatan uang, bisa disaring dan diunduh")}
       ${item("perjalanan", "Perjalanan", "Pengeluaran per perjalanan, dipisah toko dan pribadi")}
       ${item("tagihan", "Tagihan rutin", "Jatuh tempo dan status bayar bulan ini")}
-      ${item("data", "Data induk", "Kategori, dompet, supplier, barang, persen untung")}
+      ${item("data", "Data induk", "Kategori, supplier, barang (foto, satuan, harga)")}
       ${item("akun", "Akun", "Ubah password, keluar")}
     </div>`;
 }

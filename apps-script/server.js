@@ -20,6 +20,7 @@ function doPost(e) {
       case "muat": return jawab(muat());
       case "batch": return jawab(batch(req.data || {}, user));
       case "ubahPassword": return jawab(ubahPassword(user, req.data || {}));
+      case "unggahFoto": return jawab(unggahFoto(req.data || {}));
       case "cek": return jawab({ ok: true, user: user });
       default: return jawab({ ok: false, pesan: "Aksi tidak dikenal: " + req.aksi });
     }
@@ -216,6 +217,36 @@ function ubahPassword(user, d) {
   var salt = Utilities.getUuid();
   tulisBaris(c, { username: user, salt: salt, hash: hashPassword(String(d.baru), salt), password_baru: "" }, "username");
   return { ok: true };
+}
+
+// ---------- Foto barang (Google Drive) ----------
+// Foto disimpan di folder "Toko Imanuel - Foto barang" di Drive pemilik, bisa dilihat siapa saja yang punya tautannya.
+// Kolom barang.foto berisi ID file Drive.
+function folderFoto() {
+  var p = PropertiesService.getScriptProperties();
+  var id = p.getProperty("FOLDER_FOTO");
+  if (id) {
+    try { var f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {}
+  }
+  var baru = DriveApp.createFolder("Toko Imanuel - Foto barang");
+  p.setProperty("FOLDER_FOTO", baru.getId());
+  return baru;
+}
+
+function unggahFoto(d) {
+  var data = String(d.data || "");
+  if (!data) return { ok: false, pesan: "Foto kosong." };
+  if (data.length > 3000000) return { ok: false, pesan: "Foto terlalu besar." };
+  var mime = /^image\/(jpeg|png|webp)$/.test(String(d.mime)) ? String(d.mime) : "image/jpeg";
+  var nama = String(d.nama || "barang").replace(/[\\\/:*?"<>|]+/g, " ").slice(0, 80) + ".jpg";
+  var file = folderFoto().createFile(Utilities.newBlob(Utilities.base64Decode(data), mime, nama));
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+  return { ok: true, id: file.getId() };
+}
+
+// Jalankan sekali dari editor (Jalankan > izinkanFoto) supaya Google meminta izin Drive.
+function izinkanFoto() {
+  Logger.log("Folder foto: " + folderFoto().getUrl());
 }
 
 // Jalankan sekali dari editor Apps Script untuk memeriksa database (menu Jalankan > cekDatabase).

@@ -4,7 +4,8 @@ Pencatatan keuangan dan belanja Toko Imanuel: isi data dari HP, laporan laba kas
 
 - Web: `docs/` (HTML, CSS, JavaScript tanpa build), dipasang di GitHub Pages pada `toko.imanuelfl.my.id`
 - Server: `apps-script/` (Google Apps Script yang menempel di Google Sheets database)
-- Hitungan: `docs/js/hitung.js` (laba kas, saldo dompet, uang toko ↔ pribadi, tagihan, harga saran)
+- Hitungan: `docs/js/hitung.js` (laba kas, saldo dompet, uang toko ↔ pribadi, tagihan, satuan berlapis, nama barang kembar)
+- Foto barang: diunggah lewat Apps Script ke folder Google Drive pemilik; kolom `barang.foto` berisi ID file
 - Uji: `node --test tests/*.test.mjs`
 
 Cara pasang: lihat [PANDUAN-PASANG.md](PANDUAN-PASANG.md).
