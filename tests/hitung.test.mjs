@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { ringkasBulan, saldoDompet, hargaIkutModal, lapisan, isiTotal, kolomLapisan, teksLapisan, satukanNama, statusTagihan, geserBulan, akhirBulan, cariBarang, indeks } from "../docs/js/hitung.js";
+import { ringkasBulan, ringkasRentang, awalMinggu, geserHari, namaHari, saldoDompet, hargaIkutModal, lapisan, isiTotal, kolomLapisan, teksLapisan, satukanNama, statusTagihan, geserBulan, akhirBulan, cariBarang, indeks } from "../docs/js/hitung.js";
 
 const dompet = [
   { id: "cash", pemilik: "toko" }, { id: "sea", pemilik: "toko" }, { id: "fp", pemilik: "toko" }, { id: "bca", pemilik: "pribadi" }
@@ -129,4 +129,28 @@ test("cari barang", () => {
   const b = [{ nama: "Kompor HOCK 16" }, { nama: "kepala kompor 22" }, { nama: "panci DD 22" }];
   assert.deepEqual(cariBarang(b, "kompor").map(x => x.nama), ["Kompor HOCK 16", "kepala kompor 22"]);
   assert.deepEqual(cariBarang(b, "22 kompor").map(x => x.nama), ["kepala kompor 22"]);
+});
+
+test("ringkasan harian dan mingguan", () => {
+  const state = { kategori, dompet, transaksi: [
+    T("2026-11-01", "masuk", "jual", "cash", 300000),
+    T("2026-11-02", "masuk", "jual", "cash", 500000),
+    T("2026-11-02", "keluar", "stok", "cash", 200000),
+    T("2026-11-08", "masuk", "jual", "cash", 100000),
+    T("2026-11-09", "masuk", "jual", "cash", 700000)
+  ] };
+  assert.equal(awalMinggu("2026-11-06"), "2026-11-02", "minggu mulai Senin");
+  assert.equal(awalMinggu("2026-11-08"), "2026-11-02", "Minggu ikut minggu sebelumnya");
+  assert.equal(awalMinggu("2026-11-02"), "2026-11-02");
+  assert.equal(geserHari("2026-11-30", 1), "2026-12-01");
+  assert.equal(namaHari("2026-11-06"), "Jum");
+  const hari = ringkasRentang(state, "2026-11-02", "2026-11-02");
+  assert.equal(hari.penjualan, 500000);
+  assert.equal(hari.laba, 300000);
+  const minggu = ringkasRentang(state, "2026-11-02", geserHari("2026-11-02", 6));
+  assert.equal(minggu.penjualan, 600000);
+  assert.equal(minggu.hariBuka, 2);
+  const bulan = ringkasBulan(state, "2026-11");
+  assert.equal(bulan.penjualan, 1600000);
+  assert.deepEqual(Object.keys(bulan.hari).sort(), ["01", "02", "08", "09"], "ringkasBulan tetap berkunci tanggal 2 digit");
 });

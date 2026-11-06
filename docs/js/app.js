@@ -21,7 +21,7 @@ const RUTE = [
   [/^riwayat$/, "Riwayat", isi.riwayat, "riwayat"],
   [/^laporan$/, "Laporan", laporan.menu, "laporan", true],
   [/^dashboard$/, "Dashboard", laporan.dashboard, "laporan", true],
-  [/^laba$/, "Laba bulanan", laporan.laba, "laporan", true],
+  [/^laba$/, "Keuangan", laporan.laba, "laporan", true],
   [/^buku-kas$/, "Buku kas", laporan.bukuKas, "laporan", true],
   [/^tutup-buku$/, "Tutup buku", kelola.tutupBuku, "laporan", true],
   [/^perjalanan$/, "Perjalanan", kelola.perjalanan, "laporan", true],

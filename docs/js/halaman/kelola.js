@@ -1,7 +1,7 @@
 // Bagian B lanjutan: tutup buku, perjalanan, tagihan, data induk, akun.
 import { S, simpan, idBaru, kat, dom, namaPengguna, unggahFoto } from "../data.js";
-import { saldoDompet, statusTagihan, bulanIni, hariIni, akhirBulan, angka, aktif, satukanNama, kunciNama, lapisan, isiTotal, kolomLapisan, teksLapisan, untungPersen } from "../hitung.js";
-import { esc, rp, titik, namaBulan, namaBulanPendek, tglPendek, toast, tanya, formDialog, pasangUang, tagPos, kartuTransaksi, isian, fotoUrl, lihatFoto, htmlFoto, pasangFoto, htmlLapisan, segarkanLapisan, DAFTAR_SATUAN } from "../ui.js";
+import { saldoDompet, statusTagihan, bulanIni, hariIni, akhirBulan, angka, aktif, satukanNama, kunciNama, lapisan, isiTotal, kolomLapisan, teksLapisan } from "../hitung.js";
+import { esc, rp, rpTanda, titik, namaBulan, namaBulanPendek, tglPendek, toast, tanya, formDialog, pasangUang, tagPos, kartuTransaksi, isian, fotoUrl, lihatFoto, htmlFoto, pasangFoto, htmlLapisan, segarkanLapisan, DAFTAR_SATUAN } from "../ui.js";
 import { api } from "../api.js";
 import { keluar } from "../app.js";
 
@@ -45,17 +45,10 @@ export function tutupBuku(main, _, q) {
     const ops = [];
     f.querySelectorAll("tr[data-d]").forEach(tr => {
       const inp = tr.querySelector("input"); if (!inp.value.trim()) return;
-      const d = dom(tr.dataset.d), asli = angka(inp.value), sistem = Math.round(saldo[d.id] || 0), sel = asli - sistem;
-      let tId = "";
-      if (sel !== 0) {
-        tId = idBaru("T");
-        const fp = d.tipe === "fastpay";
-        ops.push({ tabel: "transaksi", simpan: { id: tId, tanggal, jenis: sel < 0 ? "keluar" : "masuk", kategori: fp && sel < 0 ? "pemakaian-fastpay" : "penyesuaian", dompet: d.id, dompet_tujuan: "", nominal: Math.abs(sel), keterangan: fp && sel < 0 ? `Pemakaian saldo Fastpay ${namaBulan(bulan)}` : `Penyesuaian saldo ${d.nama} (tutup buku ${namaBulanPendek(bulan)})`, perjalanan: "", tagihan: "", nota: "", sumber: "tutup-buku", catatan: `catatan ${sistem}, asli ${asli}`, hapus: false } });
-      }
-      ops.push({ tabel: "tutup_buku", simpan: { id: idBaru("K"), bulan, dompet: d.id, saldo_sistem: sistem, saldo_asli: asli, selisih: sel, transaksi: tId, oleh: S.user, dibuat: new Date().toISOString() } });
+      const d = dom(tr.dataset.d);
+      ops.push(...opsCocokkanSaldo(d, angka(inp.value), Math.round(saldo[d.id] || 0), tanggal));
     });
     if (!ops.length) return toast("Isi saldo asli minimal satu dompet.", true);
-    // Kategori penyesuaian "masuk": pakai jenis masuk dengan kategori penyesuaian
     const b = f.querySelector("#simpan"); b.disabled = true; b.textContent = "Menyimpan…";
     try { await simpan(ops); toast("Tutup buku tersimpan"); location.hash = "#/dashboard"; }
     catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Simpan tutup buku"; }
@@ -132,34 +125,72 @@ export function tagihan(main, _, q) {
 }
 
 // ---------- B7 Data induk ----------
-export function dataInduk(main, _, q) {
-  let tab = q.tab || "kategori", bulan = bulanIni(), cari = "", supplier = "", saring = "";
-  if (!["kategori", "supplier", "barang", "pengguna"].includes(tab)) tab = "kategori";
-  const TABS = [["kategori", "Kategori"], ["supplier", "Supplier"], ["barang", "Barang"], ["pengguna", "Pengguna"]];
-  const supNama = id => (S.data.supplier.find(s => s.id === id) || {}).nama || "";
+// Barang tampil seperti sheet "Belanja Toko": per supplier dan tahun beli, satu baris per nama (pembelian terakhir).
+// Tahun nota: dari tanggal, atau dari nama file sheet asal untuk nota impor tanpa tanggal ("Belanja Toko 2026").
+const tahunNota = n => String(n.tanggal || "").slice(0, 4) || (String(n.catatan || "").match(/\b(20\d\d)\b/) || [])[1] || "-";
+function barisBarang({ supplier, tahun, cari, saring }) {
+  const nota = new Map(S.data.nota.map(n => [n.id, n]));
+  const wakil = new Map(satukanNama(S.data.barang).map(b => [kunciNama(b.nama), b]));
+  const perId = new Map(S.data.barang.map(b => [b.id, b]));
+  const grup = new Map();
+  for (const it of S.data.nota_item) {
+    const n = nota.get(it.nota); if (!n) continue;
+    const tgl = String(n.tanggal || "");
+    if (supplier && n.supplier !== supplier) continue;
+    if (tahun !== "semua" && tahunNota(n) !== tahun) continue;
+    const kunci = n.supplier + "|" + kunciNama(it.nama);
+    const g = grup.get(kunci);
+    const beli = { ...it, tanggal: tgl, tahun: tahunNota(n), supplier: n.supplier };
+    if (!g) grup.set(kunci, { beli, kali: 1 });
+    else { g.kali++; if (tgl > g.beli.tanggal || (tgl === g.beli.tanggal && String(it.id) > String(g.beli.id))) g.beli = beli; }
+  }
+  let rows = [...grup.values()].map(({ beli, kali }) => {
+    const b = wakil.get(kunciNama(beli.nama)) || perId.get(beli.barang) || null;
+    return { b, nama: beli.nama, supplier: beli.supplier, tanggal: beli.tanggal, tahun: beli.tahun, kali, qty: angka(beli.qty), satuan: beli.satuan, isi: angka(beli.isi) || 1, harga: angka(beli.harga), total: angka(beli.total) || angka(beli.qty) * angka(beli.harga), modal: angka(beli.modal) };
+  });
+  // Barang yang belum pernah ada di nota (ditambah manual) tampil di "Semua tahun"
+  if (tahun === "semua") {
+    const ada = new Set(rows.map(r => r.supplier + "|" + kunciNama(r.nama)));
+    for (const b of wakil.values()) {
+      if (supplier && b.supplier !== supplier) continue;
+      if ([...b._kembar].some(id => { const x = perId.get(id); return x && ada.has(x.supplier + "|" + kunciNama(x.nama)); })) continue;
+      const L = lapisan(b);
+      rows.push({ b, nama: b.nama, supplier: b.supplier, tanggal: "", kali: 0, qty: 0, satuan: L[0].satuan, isi: isiTotal(L), harga: angka(b.modal) * isiTotal(L), total: 0, modal: angka(b.modal) });
+    }
+  }
+  const kata = kunciNama(cari).split(" ").filter(Boolean);
+  if (kata.length) rows = rows.filter(r => { const k = kunciNama(r.nama); return kata.every(w => k.includes(w)); });
+  if (saring === "harga") rows = rows.filter(r => !(r.b && angka(r.b.harga_jual) > 0));
+  if (saring === "foto") rows = rows.filter(r => !(r.b && r.b.foto));
+  const urut = new Map(S.data.supplier.map((s, i) => [s.id, angka(s.urutan) || i + 1]));
+  rows.sort((a, b) => (urut.get(a.supplier) || 999) - (urut.get(b.supplier) || 999) || String(a.nama).localeCompare(String(b.nama), "id", { sensitivity: "base" }));
+  return rows;
+}
 
-  const daftarBarang = () => {
-    const kata = kunciNama(cari).split(" ").filter(Boolean);
-    let list = satukanNama(S.data.barang.filter(b => !supplier || b.supplier === supplier))
-      .filter(b => kata.every(k => kunciNama(b.nama).includes(k)));
-    if (saring === "harga") list = list.filter(b => !(angka(b.harga_jual) > 0));
-    if (saring === "foto") list = list.filter(b => !b.foto);
-    list.sort((a, b) => (b.aktif ? 1 : 0) - (a.aktif ? 1 : 0) || String(a.nama).localeCompare(String(b.nama), "id", { sensitivity: "base" }));
-    return list;
-  };
+export function dataInduk(main, _, q) {
+  let tab = q.tab || "kategori", bulan = bulanIni(), cari = "", saring = "", supplier = q.supplier || "";
+  const TAHUN = [...new Set(S.data.nota.map(tahunNota))].sort().reverse();
+  let tahun = q.tahun || (TAHUN.includes(bulanIni().slice(0, 4)) ? bulanIni().slice(0, 4) : TAHUN.find(t => t !== "-") || "semua");
+  if (!["kategori", "dompet", "supplier", "barang", "pengguna"].includes(tab)) tab = "kategori";
+  const TABS = [["kategori", "Kategori"], ["dompet", "Dompet"], ["supplier", "Supplier"], ["barang", "Barang"], ["pengguna", "Pengguna"]];
+  const supNama = id => (S.data.supplier.find(s => s.id === id) || {}).nama || "Tanpa supplier";
+
   const gambarBarang = () => {
-    const list = daftarBarang(), digabung = list.reduce((s, b) => s + b._kembar.length - 1, 0);
-    main.querySelector("#daftar-barang").innerHTML = list.map(b => {
-      const src = fotoUrl(b.foto, 160), u = untungPersen(b.modal, b.harga_jual), lap = teksLapisan(lapisan(b));
-      return `<button type="button" class="brg ${b.aktif ? "" : "mati"}" data-barang="${esc(b.id)}" data-kembar="${esc(b._kembar.join(","))}">
-        <span class="foto-kecil ${src ? "" : "kosong"}">${src ? `<img src="${esc(src)}" alt="" loading="lazy">` : "📷"}</span>
-        <span><b>${esc(b.nama)}</b>${b._kembar.length > 1 ? ` <span class="st grey">${b._kembar.length} catatan</span>` : ""}</span>
-        <span class="kanan"><b>${angka(b.harga_jual) ? rp(b.harga_jual) : '<span class="muted small">belum ada harga</span>'}</b></span>
-        <span class="meta">per ${esc(b.satuan_jual || "bh")}${lap ? " · " + esc(lap) : ""}${supNama(b.supplier) ? " · " + esc(supNama(b.supplier)) : ""}${b.aktif ? "" : " · tidak dijual lagi"}</span>
-        <span class="meta kanan">modal ${titik(b.modal)}${u !== null ? ` · <span class="${u <= 0 ? "minus" : ""}">${u}%</span>` : ""}</span>
-      </button>`;
-    }).join("") || '<p class="small muted">Tidak ada barang yang cocok.</p>';
-    main.querySelector("#jumlah-barang").textContent = `${titik(list.length)} barang${digabung ? ` · ${digabung} catatan bernama sama digabung` : ""}`;
+    const rows = barisBarang({ supplier, tahun, cari, saring });
+    let lalu = null, html = "";
+    for (const r of rows) {
+      if (!supplier && r.supplier !== lalu) { lalu = r.supplier; html += `<tr class="grup"><td colspan="9">${esc(supNama(r.supplier))}</td></tr>`; }
+      const b = r.b, src = b ? fotoUrl(b.foto, 120) : "", jual = b ? angka(b.harga_jual) : 0, lap = b ? teksLapisan(lapisan(b)) : "";
+      html += `<tr class="klik ${b && !b.aktif ? "muted" : ""}" data-barang="${esc(b ? b.id : "")}" data-kembar="${esc(b ? b._kembar.join(",") : "")}">
+        <td><span class="foto-kecil ${src ? "" : "kosong"}">${src ? `<img src="${esc(src)}" alt="" loading="lazy">` : "📷"}</span></td>
+        <td class="num">${r.qty ? titik(r.qty) : ""}</td><td>${esc(r.satuan || "")}</td><td class="num" ${lap ? `title="${esc(lap)}"` : ""}>${titik(r.isi)}</td>
+        <td><b>${esc(r.nama)}</b><div class="tiny muted">${r.tanggal ? `dibeli ${tglPendek(r.tanggal)}${tahun === "semua" ? " " + r.tanggal.slice(0, 4) : ""}${r.kali > 1 ? ` · ${r.kali}× beli` : ""}` : r.kali ? `tanpa tanggal${tahun === "semua" && r.tahun !== "-" ? " (" + r.tahun + ")" : ""}${r.kali > 1 ? ` · ${r.kali}× beli` : ""}` : "belum ada nota"}${lap && lap.split("=").length > 2 ? " · " + esc(lap) : ""}</div></td>
+        <td class="num">${r.harga ? rp(r.harga) : ""}</td><td class="num">${r.total ? rp(r.total) : ""}</td><td class="num">${r.modal ? rp(r.modal) : ""}</td>
+        <td class="num"><b>${jual ? rp(jual) : ""}</b></td>
+      </tr>`;
+    }
+    main.querySelector("#rows-barang").innerHTML = html || '<tr><td colspan="9" class="muted">Tidak ada barang yang cocok.</td></tr>';
+    main.querySelector("#jumlah-barang").textContent = `${titik(rows.length)} barang · ${supplier ? supNama(supplier) : "semua supplier"} · ${tahun === "semua" ? "semua tahun" : tahun === "-" ? "tanpa tanggal" : tahun}`;
   };
 
   const gambar = () => {
@@ -171,18 +202,31 @@ export function dataInduk(main, _, q) {
         <div class="tabel"><table><thead><tr><th>Kategori</th><th>Jenis</th><th>Pos</th><th class="num">Dipakai</th><th>Aktif</th><th></th></tr></thead><tbody>
         ${S.data.kategori.filter(k => k.peran !== "pindah").map(k => `<tr class="${k.aktif ? "" : "muted"}"><td>${esc(k.nama)}</td><td>${esc(k.jenis)}</td><td>${tagPos(k.pos)}</td><td class="num">${pakai[k.id] || 0} kali</td><td>${k.aktif ? "ya" : "tidak"}</td><td><button class="link small" data-ubah="${esc(k.id)}">Ubah</button></td></tr>`).join("")}
         </tbody></table></div><p class="tiny muted">"Dipakai" dihitung dari buku kas untuk pilihan di atas, tidak pernah direset. Kategori yang tidak dipakai lagi cukup dimatikan, transaksi lamanya tetap aman. Mengubah Pos (toko/pribadi) langsung mengubah hitungan semua bulan.</p>`;
+    } else if (tab === "dompet") {
+      const s = saldoDompet(S.data, hariIni());
+      const cocok = id => S.data.tutup_buku.filter(x => x.dompet === id).sort((a, b) => (String(a.dibuat) < String(b.dibuat) ? 1 : -1))[0];
+      const jumlah = p => S.data.dompet.filter(d => d.aktif && d.pemilik === p).reduce((t, d) => t + (s[d.id] || 0), 0);
+      isi = `<div class="baris"><span class="small">Toko <b>${rp(jumlah("toko"))}</b> · Pribadi <b>${rp(jumlah("pribadi"))}</b></span><button class="tombol kecil" data-baru>＋ Dompet</button></div>
+        <div class="tabel"><table><thead><tr><th>Dompet</th><th>Pemilik</th><th>Jenis</th><th class="num">Saldo</th><th>Terakhir dicocokkan</th><th></th></tr></thead><tbody>
+        ${S.data.dompet.map(d => { const c = cocok(d.id); return `<tr class="klik ${d.aktif ? "" : "muted"}" data-ubah="${esc(d.id)}"><td>${esc(d.nama)}${d.aktif ? "" : ' <span class="st grey">tidak dipakai</span>'}</td><td>${tagPos(d.pemilik)}</td><td>${esc(d.tipe)}</td><td class="num ${(s[d.id] || 0) < 0 ? "minus" : ""}"><b>${rp(s[d.id] || 0)}</b></td><td class="small">${c ? `${tglPendek(String(c.dibuat).slice(0, 10))}${angka(c.selisih) ? ` <span class="muted">(selisih ${rpTanda(c.selisih)})</span>` : ' <span class="st ok">cocok</span>'}` : '<span class="muted">belum</span>'}</td><td><button class="link small" data-ubah="${esc(d.id)}">Ubah saldo</button></td></tr>`; }).join("")}
+        </tbody></table></div>
+        <p class="tiny muted">Saldo dihitung dari semua catatan uang. Di akhir bulan, ketuk dompet lalu isi saldo aslinya (lihat di aplikasi bank, aplikasi Fastpay, atau hitung laci). Selisihnya dicatat sebagai penyesuaian, sama seperti Tutup buku: tidak dihitung ke laba, kecuali Fastpay yang berkurang dicatat sebagai pemakaian saldo Fastpay. Pemilik dompet adalah dasar pemisahan uang toko dan pribadi.</p>`;
     } else if (tab === "supplier") {
       isi = `<div class="baris"><span></span><button class="tombol kecil" data-baru>＋ Supplier</button></div><div class="tabel"><table><thead><tr><th>Supplier</th><th class="num">Barang</th><th class="num">Nota</th><th>Aktif</th><th></th></tr></thead><tbody>
         ${S.data.supplier.map(s => `<tr class="${s.aktif ? "" : "muted"}"><td>${esc(s.nama)}</td><td class="num">${satukanNama(S.data.barang.filter(b => b.supplier === s.id)).length}</td><td class="num">${S.data.nota.filter(n => n.supplier === s.id).length}</td><td>${s.aktif ? "ya" : "tidak"}</td><td><button class="link small" data-ubah="${esc(s.id)}">Ubah</button></td></tr>`).join("")}
         </tbody></table></div>`;
     } else if (tab === "barang") {
-      const pakaiSup = S.data.supplier.filter(s => S.data.barang.some(b => b.supplier === s.id));
-      isi = `<div class="baris"><input class="input" id="cari-barang" placeholder="Cari barang…" value="${esc(cari)}" style="flex:1"><button class="tombol kecil" data-baru>＋ Barang</button></div>
-        <div class="chips" id="fs"><button data-v="" class="${supplier ? "" : "on"}">Semua supplier</button>${pakaiSup.map(s => `<button data-v="${esc(s.id)}" class="${supplier === s.id ? "on" : ""}">${esc(s.nama)}</button>`).join("")}</div>
-        <div class="chips" id="fk"><button data-v="" class="${saring ? "" : "on"}">Semua</button><button data-v="harga" class="${saring === "harga" ? "on" : ""}">Belum ada harga jual</button><button data-v="foto" class="${saring === "foto" ? "on" : ""}">Belum ada foto</button></div>
-        <span class="subjudul" id="jumlah-barang"></span>
-        <div class="daftar" id="daftar-barang"></div>
-        <p class="tiny muted">Nama yang sama (beda huruf besar atau tanda baca, mis. "5,5L" dan "5.5L") tampil sekali, memakai catatan yang paling baru dibeli. Ketuk barang untuk mengubah foto, satuan, dan harga.</p>`;
+      isi = `<div class="saring-barang">
+          <div class="isian"><label for="fs">Supplier</label><select class="input" id="fs"><option value="">Semua supplier</option>${S.data.supplier.map(s => `<option value="${esc(s.id)}" ${supplier === s.id ? "selected" : ""}>${esc(s.nama)}</option>`).join("")}</select></div>
+          <div class="isian"><label for="ft">Tahun beli</label><select class="input" id="ft">${TAHUN.map(t => `<option value="${t}" ${tahun === t ? "selected" : ""}>${t === "-" ? "Tanpa tanggal" : t}</option>`).join("")}<option value="semua" ${tahun === "semua" ? "selected" : ""}>Semua tahun</option></select></div>
+          <div class="isian"><label for="fk">Tampilkan</label><select class="input" id="fk"><option value="">Semua barang</option><option value="harga" ${saring === "harga" ? "selected" : ""}>Belum ada harga jual</option><option value="foto" ${saring === "foto" ? "selected" : ""}>Belum ada foto</option></select></div>
+          <div class="isian"><label for="cari-barang">Cari</label><input class="input" id="cari-barang" placeholder="nama barang…" value="${esc(cari)}"></div>
+        </div>
+        <div class="baris"><span class="subjudul" id="jumlah-barang"></span><button class="tombol kecil" data-baru>＋ Barang</button></div>
+        <div class="tabel tabel-barang"><table>
+          <thead><tr><th>Foto</th><th colspan="3" style="text-align:center">Jumlah</th><th>Nama Barang</th><th class="num">Harga</th><th class="num">Total</th><th class="num">Modal Awal</th><th class="num">Harga Jual</th></tr></thead>
+          <tbody id="rows-barang"></tbody></table></div>
+        <p class="tiny muted">Seperti sheet Belanja Toko: Jumlah = banyaknya, satuan beli, dan isinya; Harga per satuan beli; Modal Awal dan Harga Jual per satuan jual. Barang yang dibeli berkali-kali tampil sekali dengan pembelian terakhirnya. Ketuk baris untuk mengubah foto, satuan, dan harga jual.</p>`;
     } else if (tab === "pengguna") {
       isi = `<div class="tabel"><table><thead><tr><th>Nama</th><th>Nama pengguna</th><th>Hak</th></tr></thead><tbody>${S.data.pengguna.map(u => `<tr><td>${esc(u.nama)}</td><td>${esc(u.username)}</td><td><span class="st ok">Admin</span></td></tr>`).join("")}</tbody></table></div>
         <p class="tiny muted">Pengguna dan password diatur di tab "pengguna" pada Google Sheets database (lihat PANDUAN-PASANG.md). Ubah password sendiri lewat menu Akun.</p>`;
@@ -192,16 +236,23 @@ export function dataInduk(main, _, q) {
     const pb = main.querySelector("#pb"); if (pb) pb.onclick = e => { const b = e.target.closest("button"); if (b) { bulan = b.dataset.v; gambar(); } };
     if (tab === "barang") {
       main.querySelector("#cari-barang").oninput = e => { cari = e.target.value; gambarBarang(); };
-      const chip = (id, set) => (main.querySelector(id).onclick = e => { const b = e.target.closest("button"); if (!b) return; set(b.dataset.v); main.querySelectorAll(id + " button").forEach(x => x.classList.toggle("on", x === b)); gambarBarang(); });
-      chip("#fs", v => (supplier = v)); chip("#fk", v => (saring = v));
-      main.querySelector("#daftar-barang").onclick = async e => {
-        const b = e.target.closest("[data-barang]"); if (!b) return;
-        const row = S.data.barang.find(x => x.id === b.dataset.barang);
-        if (e.target.closest(".foto-kecil img")) return lihatFoto(fotoUrl(row.foto, 1200), row.nama);
-        if (await ubahBarang(row, b.dataset.kembar.split(","))) gambarBarang();
+      main.querySelector("#fs").onchange = e => { supplier = e.target.value; gambarBarang(); };
+      main.querySelector("#ft").onchange = e => { tahun = e.target.value; gambarBarang(); };
+      main.querySelector("#fk").onchange = e => { saring = e.target.value; gambarBarang(); };
+      main.querySelector("#rows-barang").onclick = async e => {
+        const tr = e.target.closest("tr[data-barang]"); if (!tr || !tr.dataset.barang) return;
+        const row = S.data.barang.find(x => x.id === tr.dataset.barang);
+        if (row.foto && e.target.closest(".foto-kecil img")) return lihatFoto(fotoUrl(row.foto, 1200), row.nama);
+        if (await ubahBarang(row, tr.dataset.kembar.split(","))) gambarBarang();
       };
-      main.querySelector("[data-baru]").onclick = async () => { if (await ubahBarang(null, [])) gambarBarang(); };
+      main.querySelector("[data-baru]").onclick = async () => { if (await ubahBarang(null, [], { supplier })) gambarBarang(); };
       gambarBarang();
+      return;
+    }
+    if (tab === "dompet") {
+      const buka = async row => { if (await ubahDompet(row)) gambar(); };
+      main.querySelector("[data-baru]").onclick = () => buka(null);
+      main.querySelector("tbody").onclick = e => { const tr = e.target.closest("[data-ubah]"); if (tr) buka(S.data.dompet.find(d => d.id === tr.dataset.ubah)); };
       return;
     }
     const baru = main.querySelector("[data-baru]"); if (baru) baru.onclick = () => ubah(null);
@@ -226,11 +277,85 @@ export function dataInduk(main, _, q) {
   gambar();
 }
 
+// Saldo asli satu dompet pada suatu tanggal. Selisih dengan catatan jadi transaksi penyesuaian
+// (Fastpay yang berkurang = pemakaian saldo Fastpay, dihitung ke laba), plus baris tutup_buku.
+function opsCocokkanSaldo(d, asli, sistem, tanggal, sumber = "tutup-buku") {
+  const bulan = tanggal.slice(0, 7), sel = Math.round(asli - sistem), ops = [];
+  let tId = "";
+  if (sel !== 0) {
+    tId = idBaru("T");
+    const fp = d.tipe === "fastpay" && sel < 0;
+    ops.push({ tabel: "transaksi", simpan: { id: tId, tanggal, jenis: sel < 0 ? "keluar" : "masuk", kategori: fp ? "pemakaian-fastpay" : "penyesuaian", dompet: d.id, dompet_tujuan: "", nominal: Math.abs(sel), keterangan: fp ? `Pemakaian saldo Fastpay ${namaBulan(bulan)}` : `Penyesuaian saldo ${d.nama} (${sumber === "dompet" ? "saldo diubah" : "tutup buku"} ${namaBulanPendek(bulan)})`, perjalanan: "", tagihan: "", nota: "", sumber, catatan: `catatan ${Math.round(sistem)}, asli ${asli}`, hapus: false } });
+  }
+  ops.push({ tabel: "tutup_buku", simpan: { id: idBaru("K"), bulan, dompet: d.id, saldo_sistem: Math.round(sistem), saldo_asli: asli, selisih: sel, transaksi: tId, oleh: S.user, dibuat: new Date().toISOString() } });
+  return ops;
+}
+
+// Dialog dompet: nama, pemilik, jenis, dan saldo asli per tanggal. Hasil: true kalau tersimpan.
+function ubahDompet(row) {
+  return new Promise(res => {
+    const d0 = row || { nama: "", pemilik: "toko", tipe: "bank", aktif: true };
+    const dlg = document.createElement("dialog");
+    dlg.innerHTML = `<form class="isi" method="dialog"><h3>${row ? esc(row.nama) : "Dompet baru"}</h3>
+      ${isian({ id: "nama", label: "Nama dompet", value: d0.nama })}
+      <div class="g2">
+        ${isian({ id: "pemilik", label: "Pemilik", type: "select", value: d0.pemilik, options: [{ value: "toko", label: "Toko" }, { value: "pribadi", label: "Pribadi" }] })}
+        ${isian({ id: "tipe", label: "Jenis", type: "select", value: d0.tipe, options: ["tunai", "bank", "e-wallet", "fastpay"].map(v => ({ value: v, label: v })) })}
+      </div>
+      ${isian({ id: "aktif", label: "Masih dipakai", type: "checkbox", value: d0.aktif })}
+      <div class="subjudul">Saldo</div>
+      <div class="g2">
+        ${isian({ id: "tanggal", label: "Saldo per tanggal", type: "date", value: hariIni() })}
+        <div class="isian"><label for="f-saldo">${row ? "Saldo asli" : "Saldo awal"}</label><input class="input uang" inputmode="numeric" id="f-saldo" name="saldo" placeholder="0"></div>
+      </div>
+      <div class="catatan info" data-info></div>
+      <div class="baris"><button type="button" class="tombol garis" data-batal>Batal</button><button class="tombol" data-simpan>Simpan</button></div>
+    </form>`;
+    document.body.appendChild(dlg);
+    pasangUang(dlg);
+    const form = dlg.querySelector("form"), inSaldo = form.elements.saldo, inTgl = form.elements.tanggal;
+    let disentuh = false;
+    const sistem = () => (row ? saldoDompet(S.data, inTgl.value || hariIni())[row.id] || 0 : 0);
+    const info = () => {
+      const s = Math.round(sistem());
+      if (!disentuh && row) inSaldo.value = s ? (s < 0 ? "-" : "") + titik(s) : "0";
+      const sel = disentuh ? angka(inSaldo.value) - s : 0;
+      const fp = form.elements.tipe.value === "fastpay" && sel < 0;
+      dlg.querySelector("[data-info]").innerHTML = row
+        ? `<b>Menurut catatan: ${rp(s)}</b><span>${!disentuh ? "Ubah angka di atas kalau saldo aslinya berbeda." : sel === 0 ? "Cocok, tidak ada penyesuaian." : `Selisih ${rpTanda(sel)} dicatat ${fp ? "sebagai pemakaian saldo Fastpay (biaya toko)" : "sebagai penyesuaian saldo (tidak dihitung ke laba)"} pada ${tglPendek(inTgl.value)}.`}</span>`
+        : `<span>Saldo awal dicatat sebagai penyesuaian saldo, tidak dihitung ke laba.</span>`;
+    };
+    inSaldo.addEventListener("input", () => { disentuh = true; info(); });
+    inTgl.addEventListener("change", info);
+    form.elements.tipe.addEventListener("change", info);
+    info();
+    const tutup = v => { dlg.close(); dlg.remove(); res(v); };
+    dlg.querySelector("[data-batal]").onclick = () => tutup(false);
+    dlg.addEventListener("cancel", e => { e.preventDefault(); tutup(false); });
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const nama = form.elements.nama.value.trim();
+      if (!nama) return toast("Isi nama dompet.", true);
+      const tanggal = inTgl.value || hariIni();
+      if (tanggal > hariIni()) return toast("Tanggal saldo tidak boleh setelah hari ini.", true);
+      const d = { ...(row || { id: idBaru("D"), urutan: S.data.dompet.length + 1 }), nama, pemilik: form.elements.pemilik.value, tipe: form.elements.tipe.value, aktif: form.elements.aktif.checked };
+      const ops = [{ tabel: "dompet", simpan: d }];
+      if (row ? disentuh : angka(inSaldo.value)) ops.push(...opsCocokkanSaldo(d, angka(inSaldo.value), row ? sistem() : 0, tanggal, "dompet"));
+      const btn = dlg.querySelector("[data-simpan]"); btn.disabled = true; btn.textContent = "Menyimpan…";
+      try { await simpan(ops); toast(ops.length > 1 ? "Dompet dan saldo tersimpan" : "Dompet tersimpan"); tutup(true); }
+      catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Simpan"; }
+    };
+    dlg.showModal();
+  });
+}
+
+const BARANG_KOSONG = { nama: "", supplier: "", modal: 0, harga_jual: "", aktif: true, foto: "" };
+
 // Dialog ubah/tambah barang: foto, nama, supplier, satuan berlapis, modal dan harga jual per satuan terakhir.
 // kembar: id barang lain bernama sama; harga jual dan foto ikut diubah. Hasil: true kalau tersimpan.
-function ubahBarang(row, kembar) {
+function ubahBarang(row, kembar, awal = {}) {
   return new Promise(res => {
-    const b = row || { nama: "", supplier: "", modal: 0, harga_jual: "", aktif: true, foto: "" };
+    const b = row || { ...BARANG_KOSONG, ...awal };
     let L = row ? lapisan(row) : [{ satuan: "", isi: 1 }], fotoBaru = null;
     let modalBeli = angka(b.modal) * isiTotal(L); // modal per satuan-1 tetap saat susunan satuan diubah
     const lain = kembar.filter(id => id && id !== b.id);

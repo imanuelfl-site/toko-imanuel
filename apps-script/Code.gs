@@ -244,17 +244,32 @@ function ubahPassword(user, d) {
 }
 
 // ---------- Foto barang (Google Drive) ----------
-// Foto disimpan di folder "Toko Imanuel - Foto barang" di Drive pemilik, bisa dilihat siapa saja yang punya tautannya.
-// Kolom barang.foto berisi ID file Drive.
+// Foto disimpan di folder "Toko Imanuel - Foto barang", di folder yang sama dengan file database
+// (mis. My Drive > Data-keluaran). Bisa dilihat siapa saja yang punya tautannya. Kolom barang.foto berisi ID file Drive.
+// Folder dicari lewat ID-nya, jadi tetap ketemu walau dipindah atau diganti nama.
+var NAMA_FOLDER_FOTO = "Toko Imanuel - Foto barang";
+
+// Folder tempat file database berada (atau My Drive kalau tidak diketahui).
+function folderDatabase() {
+  try {
+    var it = DriveApp.getFileById(SpreadsheetApp.getActiveSpreadsheet().getId()).getParents();
+    if (it.hasNext()) return it.next();
+  } catch (e) {}
+  return DriveApp.getRootFolder();
+}
+
 function folderFoto() {
   var p = PropertiesService.getScriptProperties();
   var id = p.getProperty("FOLDER_FOTO");
   if (id) {
     try { var f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {}
   }
-  var baru = DriveApp.createFolder("Toko Imanuel - Foto barang");
-  p.setProperty("FOLDER_FOTO", baru.getId());
-  return baru;
+  // Belum tercatat: pakai folder bernama sama di samping database kalau sudah ada, jangan buat dobel.
+  var induk = folderDatabase();
+  var ada = induk.getFoldersByName(NAMA_FOLDER_FOTO);
+  var folder = ada.hasNext() ? ada.next() : induk.createFolder(NAMA_FOLDER_FOTO);
+  p.setProperty("FOLDER_FOTO", folder.getId());
+  return folder;
 }
 
 function unggahFoto(d) {
@@ -268,9 +283,16 @@ function unggahFoto(d) {
   return { ok: true, id: file.getId() };
 }
 
-// Jalankan sekali dari editor (Jalankan > izinkanFoto) supaya Google meminta izin Drive.
+// Jalankan dari editor (Jalankan > izinkanFoto): meminta izin Drive, lalu memastikan folder foto
+// berada di folder yang sama dengan database. Kalau belum, folder foto dipindah ke sana.
 function izinkanFoto() {
-  Logger.log("Folder foto: " + folderFoto().getUrl());
+  var foto = folderFoto(), induk = folderDatabase();
+  var di = foto.getParents(), sama = false;
+  while (di.hasNext()) if (di.next().getId() === induk.getId()) sama = true;
+  if (!sama) { foto.moveTo(induk); Logger.log("Folder foto dipindah ke folder database."); }
+  Logger.log("Database ada di folder: " + induk.getName());
+  Logger.log("Folder foto: " + induk.getName() + " / " + foto.getName() + " -> " + foto.getUrl());
+  return { database: induk.getName(), foto: foto.getName(), dipindah: !sama };
 }
 
 // Jalankan sekali dari editor Apps Script untuk memeriksa database (menu Jalankan > cekDatabase).

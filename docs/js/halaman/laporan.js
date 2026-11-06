@@ -1,6 +1,6 @@
 // Bagian B: menu laporan, dashboard, laba bulanan, buku kas.
 import { S, kat, dom, namaPengguna, pengaturan } from "../data.js";
-import { ringkasBulan, rataLaba, saldoDompet, statusTagihan, hargaNaik, bulanIni, hariIni, geserBulan, akhirBulan, jumlahHari, angka, aktif } from "../hitung.js";
+import { ringkasBulan, ringkasRentang, geserHari, awalMinggu, namaHari, rataLaba, saldoDompet, statusTagihan, hargaNaik, bulanIni, hariIni, geserBulan, akhirBulan, jumlahHari, angka, aktif } from "../hitung.js";
 import { esc, rp, rpTanda, titik, persen, namaBulan, namaBulanPendek, tglPendek, tagPos, IKON } from "../ui.js";
 
 const mulaiDipakai = () => String(pengaturan("mulai_dipakai", "2026-11-07"));
@@ -11,12 +11,12 @@ export function menu(main) {
   main.innerHTML = `
     <div class="menu-laporan">
       ${item("dashboard", "Dashboard", "Ringkasan bulan ini: penjualan, laba, saldo, yang perlu perhatian")}
-      ${item("laba", "Laba bulanan", "Laba kas beberapa bulan berdampingan dan ke mana uangnya pergi")}
+      ${item("laba", "Keuangan harian, mingguan, bulanan", "Penjualan, belanja, biaya, dan laba kas per hari, per minggu, atau beberapa bulan berdampingan")}
       ${item("tutup-buku", "Tutup buku", "Sebulan sekali: hitung laci, cek saldo semua dompet dan Fastpay")}
       ${item("buku-kas", "Buku kas", "Semua catatan uang, bisa disaring dan diunduh")}
       ${item("perjalanan", "Perjalanan", "Pengeluaran per perjalanan, dipisah toko dan pribadi")}
       ${item("tagihan", "Tagihan rutin", "Jatuh tempo dan status bayar bulan ini")}
-      ${item("data", "Data induk", "Kategori, supplier, barang (foto, satuan, harga)")}
+      ${item("data", "Data induk", "Kategori, dompet (saldo bisa diubah), supplier, barang")}
       ${item("akun", "Akun", "Ubah password, keluar")}
     </div>`;
 }
@@ -112,20 +112,82 @@ export function dashboard(main, _, q) {
   gambar(q.bulan || bulanIni());
 }
 
-// ---------- B2 Laba bulanan ----------
+// ---------- B2 Keuangan: harian, mingguan, bulanan ----------
+const KOLOM_RENTANG = [
+  ["Penjualan", r => r.penjualan],
+  ["Masuk lain", r => r.pendapatan],
+  ["Belanja stok", r => -r.belanja],
+  ["Biaya toko", r => -(r.biaya + r.layanan)],
+  ["Laba kas", r => r.laba],
+  ["Pribadi dari toko", r => -r.prive]
+];
+const sel = v => `<td class="num ${v < 0 ? "minus" : ""}">${v ? (v < 0 ? "−" : "") + titik(v) : "–"}</td>`;
+// baris: [{ label, sub, href, r }]; total: ringkasan seluruh rentang
+function tabelRentang(judulKolom, baris, total, ekstra) {
+  const ex = ekstra || { judul: "", isi: () => "" };
+  return `<div class="tabel"><table>
+    <thead><tr><th>${judulKolom}</th>${KOLOM_RENTANG.map(([l]) => `<th class="num">${l}</th>`).join("")}${ex.judul ? `<th class="num">${ex.judul}</th>` : ""}</tr></thead>
+    <tbody>
+      ${baris.map(b => `<tr class="klik ${b.r.jumlahTransaksi ? "" : "muted"}" data-href="${esc(b.href)}"><td style="white-space:nowrap">${b.label}${b.sub ? ` <span class="st grey">${b.sub}</span>` : ""}</td>${KOLOM_RENTANG.map(([, f]) => sel(f(b.r))).join("")}${ex.judul ? ex.isi(b.r) : ""}</tr>`).join("")}
+      <tr class="sorot"><td>Total</td>${KOLOM_RENTANG.map(([, f]) => sel(f(total))).join("")}${ex.judul ? ex.isi(total) : ""}</tr>
+    </tbody></table></div>`;
+}
+
 export function laba(main, _, q) {
+  let mode = ["harian", "mingguan"].includes(q.p) ? q.p : "bulanan";
   let n = +(q.n || 3), akhir = q.bulan || bulanIni();
-  const gambar = () => {
+  let bulanHarian = q.bulan || bulanIni();
+  let nMinggu = 8, mingguAkhir = awalMinggu(hariIni());
+  const MODE = [["harian", "Harian"], ["mingguan", "Mingguan"], ["bulanan", "Bulanan"]];
+  const catatanRentang = '<div class="catatan info"><b>Cara membaca</b><span>Belanja stok tercatat pada hari nota dibayar, dan pemakaian Fastpay pada hari tutup buku. Karena itu laba kas harian dan mingguan bisa naik turun tajam. Ketuk satu baris untuk melihat catatannya di Buku kas.</span></div>';
+
+  const harian = box => {
+    const ix = S.ix, kini = hariIni();
+    const akhirTgl = bulanHarian === bulanIni() ? kini : akhirBulan(bulanHarian);
+    const baris = [];
+    for (let t = akhirTgl; t >= bulanHarian + "-01"; t = geserHari(t, -1)) {
+      baris.push({ label: `${namaHari(t)} ${+t.slice(8)}`, sub: t === kini ? "hari ini" : "", href: `#/buku-kas?dari=${t}&sampai=${t}`, r: ringkasRentang(S.data, t, t, ix) });
+    }
+    const total = ringkasRentang(S.data, bulanHarian + "-01", akhirTgl, ix);
+    const terbaik = baris.slice().sort((a, b) => b.r.penjualan - a.r.penjualan)[0];
+    box.innerHTML = `<div class="baris"><div id="pb"></div><span class="small muted">${total.hariBuka} hari ada penjualan · rata-rata ${rp(total.hariBuka ? total.penjualan / total.hariBuka : 0)}${terbaik && terbaik.r.penjualan ? ` · tertinggi ${rp(terbaik.r.penjualan)} (${terbaik.label})` : ""}</span></div>
+      ${dataLama(bulanHarian) ? '<div class="catatan warn"><b>Bulan ini dari data lama</b><span>Uang yang masuk lewat rekening mungkin tidak tercatat. Pakai sebagai gambaran kasar.</span></div>' : ""}
+      <div class="kartu">${tabelRentang("Tanggal", baris, total)}</div>${catatanRentang}`;
+    box.querySelector("#pb").appendChild(pemilihBulan(main, bulanHarian, b => { bulanHarian = b; gambar(); }));
+  };
+
+  const mingguan = box => {
+    const ix = S.ix, kini = hariIni(), mingguKini = awalMinggu(kini);
+    const baris = [];
+    for (let i = 0; i < nMinggu; i++) {
+      const a = geserHari(mingguAkhir, -7 * i), z = geserHari(a, 6);
+      const r = ringkasRentang(S.data, a, z > kini ? kini : z, ix);
+      baris.push({ label: `${tglPendek(a)} – ${tglPendek(z)}`, sub: a === mingguKini ? "minggu ini" : "", href: `#/buku-kas?dari=${a}&sampai=${z}`, r });
+    }
+    const awal = geserHari(mingguAkhir, -7 * (nMinggu - 1)), ujung = geserHari(mingguAkhir, 6);
+    const total = ringkasRentang(S.data, awal, ujung > kini ? kini : ujung, ix);
+    box.innerHTML = `<div class="baris"><div class="chips" id="nm">${[4, 8, 13, 26].map(x => `<button data-v="${x}" class="${x === nMinggu ? "on" : ""}">${x} minggu</button>`).join("")}</div>
+        <div class="pilih-bulan"><button class="ikonbtn" data-g="-1" aria-label="Sebelumnya">‹</button><b style="min-width:150px">${tglPendek(awal)} ${awal.slice(0, 4)} – ${tglPendek(ujung)} ${ujung.slice(0, 4)}</b><button class="ikonbtn" data-g="1" aria-label="Berikutnya" ${mingguAkhir >= mingguKini ? "disabled" : ""}>›</button></div></div>
+      <div class="kartu">${tabelRentang("Minggu (Sen–Min)", baris, total, { judul: "Rata jual/hari", isi: r => `<td class="num">${r.hariBuka ? titik(r.penjualan / r.hariBuka) : "–"}</td>` })}</div>${catatanRentang}`;
+    box.querySelector("#nm").onclick = e => { const b = e.target.closest("button"); if (b) { nMinggu = +b.dataset.v; gambar(); } };
+    box.querySelector(".pilih-bulan").onclick = e => {
+      const b = e.target.closest("[data-g]"); if (!b || b.disabled) return;
+      const baru = geserHari(mingguAkhir, 7 * nMinggu * +b.dataset.g);
+      mingguAkhir = baru > mingguKini ? mingguKini : baru; gambar();
+    };
+  };
+
+  const bulanan = box => {
     const ix = S.ix;
     const bulanList = Array.from({ length: n }, (_, i) => geserBulan(akhir, -(n - 1 - i)));
     const R = bulanList.map(b => ringkasBulan(S.data, b, ix));
     const ada = R.filter(r => r.jumlahTransaksi);
     const rata = ada.length ? ada.reduce((s, r) => s + r.laba, 0) / ada.length : 0;
     const tahunLalu = ringkasBulan(S.data, geserBulan(akhir, -12), ix);
-    const baris = (label, fn, kelas = "", tanda = false) => `<tr class="${kelas}"><td>${label}</td>${R.map(r => { const v = fn(r); return `<td class="num ${tanda && v < 0 ? "minus" : tanda && v > 0 ? "" : ""}">${v ? (tanda ? rpTanda(v) : titik(v)) : "–"}</td>`; }).join("")}</tr>`;
+    const baris = (label, fn, kelas = "", tanda = false) => `<tr class="${kelas}"><td>${label}</td>${R.map(r => { const v = fn(r); return `<td class="num ${tanda && v < 0 ? "minus" : ""}">${v ? (tanda ? rpTanda(v) : titik(v)) : "–"}</td>`; }).join("")}</tr>`;
     const biayaKat = [...new Set(R.flatMap(r => Object.keys(r.biayaPer)))];
     const pendKat = [...new Set(R.flatMap(r => Object.keys(r.pendapatanPer)))];
-    main.innerHTML = `
+    box.innerHTML = `
       <div class="baris"><div class="chips" id="n">${[3, 6, 12].map(x => `<button data-v="${x}" class="${x === n ? "on" : ""}">${x} bulan</button>`).join("")}</div><div id="pb"></div></div>
       <div class="kartu">
         <div class="tabel"><table>
@@ -156,21 +218,29 @@ export function laba(main, _, q) {
         </tbody></table></div>
       </div>
       <div class="catatan info"><b>Cara membaca</b><span>Laba kas = uang masuk usaha − belanja stok − pemakaian Fastpay − biaya toko. Bulan dengan belanja besar terlihat kecil atau minus, jadi nilai toko dari rata-ratanya, bukan dari satu bulan.</span></div>`;
-    main.querySelector("#pb").appendChild(pemilihBulan(main, akhir, b => { akhir = b; gambar(); }));
-    main.querySelector("#n").onclick = e => { const b = e.target.closest("button"); if (b) { n = +b.dataset.v; gambar(); } };
+    box.querySelector("#pb").appendChild(pemilihBulan(main, akhir, b => { akhir = b; gambar(); }));
+    box.querySelector("#n").onclick = e => { const b = e.target.closest("button"); if (b) { n = +b.dataset.v; gambar(); } };
+  };
+
+  const gambar = () => {
+    main.innerHTML = `<div class="tabs" id="mode">${MODE.map(([v, l]) => `<button data-v="${v}" class="${v === mode ? "on" : ""}">${l}</button>`).join("")}</div><div class="tumpuk" id="isi-laba"></div>`;
+    main.querySelector("#mode").onclick = e => { const b = e.target.closest("button"); if (b) { mode = b.dataset.v; gambar(); } };
+    const box = main.querySelector("#isi-laba");
+    ({ harian, mingguan, bulanan })[mode](box);
+    box.onclick = e => { const tr = e.target.closest("tr[data-href]"); if (tr) location.hash = tr.dataset.href; };
   };
   gambar();
 }
 
 // ---------- B4 Buku kas ----------
 export function bukuKas(main, _, q) {
-  const f = { bulan: q.bulan || bulanIni(), dompet: q.dompet || "", kategori: q.kategori || "", pos: "", tanda: "", cari: "", batas: 200 };
+  const f = { dari: q.dari || "", sampai: q.sampai || q.dari || "", bulan: q.dari ? "" : q.bulan || bulanIni(), dompet: q.dompet || "", kategori: q.kategori || "", pos: "", tanda: "", cari: "", batas: 200 };
   const bulanAda = [...new Set(S.data.transaksi.map(t => (t.tanggal || "").slice(0, 7)).filter(Boolean))].sort().reverse();
   if (!bulanAda.includes(bulanIni())) bulanAda.unshift(bulanIni());
   main.innerHTML = `
     <div class="kartu">
       <div class="grid4">
-        <div class="isian"><label for="fb">Bulan</label><select class="input" id="fb"><option value="">Semua</option>${bulanAda.map(b => `<option value="${b}" ${b === f.bulan ? "selected" : ""}>${namaBulan(b)}</option>`).join("")}</select></div>
+        <div class="isian"><label for="fb">Bulan</label><select class="input" id="fb">${f.dari ? `<option value="rentang" selected>${f.dari === f.sampai ? tglPendek(f.dari) + " " + f.dari.slice(0, 4) : `${tglPendek(f.dari)} – ${tglPendek(f.sampai)} ${f.sampai.slice(0, 4)}`}</option>` : ""}<option value="">Semua</option>${bulanAda.map(b => `<option value="${b}" ${b === f.bulan ? "selected" : ""}>${namaBulan(b)}</option>`).join("")}</select></div>
         <div class="isian"><label for="fd">Dompet</label><select class="input" id="fd"><option value="">Semua dompet</option>${S.data.dompet.map(d => `<option value="${esc(d.id)}" ${d.id === f.dompet ? "selected" : ""}>${esc(d.nama)}</option>`).join("")}</select></div>
         <div class="isian"><label for="fk">Kategori</label><select class="input" id="fk"><option value="">Semua kategori</option>${S.data.kategori.map(k => `<option value="${esc(k.id)}" ${k.id === f.kategori ? "selected" : ""}>${esc(k.nama)}</option>`).join("")}</select></div>
         <div class="isian"><label for="fq">Cari</label><input class="input" id="fq" placeholder="keterangan…"></div>
@@ -186,6 +256,7 @@ export function bukuKas(main, _, q) {
     return S.data.transaksi.filter(t => {
       if (!aktif(t)) return false;
       if (f.bulan && !String(t.tanggal).startsWith(f.bulan)) return false;
+      if (f.dari) { const tg = String(t.tanggal).slice(0, 10); if (tg < f.dari || tg > f.sampai) return false; }
       if (f.dompet && t.dompet !== f.dompet && t.dompet_tujuan !== f.dompet) return false;
       if (f.kategori && t.kategori !== f.kategori) return false;
       const k = kat(t.kategori);
@@ -213,7 +284,7 @@ export function bukuKas(main, _, q) {
     }).join("") || '<tr><td colspan="7" class="muted">Tidak ada catatan.</td></tr>';
     $("#lagi").classList.toggle("hidden", list.length <= f.batas);
   };
-  $("#fb").onchange = e => { f.bulan = e.target.value; gambar(); };
+  $("#fb").onchange = e => { if (e.target.value !== "rentang") { f.dari = f.sampai = ""; f.bulan = e.target.value; } gambar(); };
   $("#fd").onchange = e => { f.dompet = e.target.value; gambar(); };
   $("#fk").onchange = e => { f.kategori = e.target.value; gambar(); };
   $("#fq").oninput = e => { f.cari = e.target.value; gambar(); };
@@ -227,7 +298,7 @@ export function bukuKas(main, _, q) {
     const csv = [kolom.join(","), ...list.map(t => [t.tanggal, t.jenis, kat(t.kategori).nama, kat(t.kategori).pos, dom(t.dompet).nama, t.dompet_tujuan ? dom(t.dompet_tujuan).nama : "", angka(t.nominal), t.keterangan, namaPengguna(t.oleh)].map(sel).join(","))].join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
-    a.download = `buku-kas-${f.bulan || "semua"}.csv`;
+    a.download = `buku-kas-${f.dari ? f.dari + (f.sampai !== f.dari ? "_" + f.sampai : "") : f.bulan || "semua"}.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };

@@ -144,7 +144,7 @@ export function nota(main, _, q) {
     let hasil = cariBarang(S.data.barang, it.nama, 30);
     hasil.sort((a, b) => (a.supplier === st.supplier ? 0 : 1) - (b.supplier === st.supplier ? 0 : 1));
     hasil = hasil.slice(0, 8);
-    list.innerHTML = hasil.map(b => `<button type="button" data-barang="${esc(b.id)}"><span>${esc(b.nama)}</span><span class="muted small">${rp(b.modal)}/${esc(b.satuan_jual || "bh")}</span></button>`).join("") || '<div class="small muted" style="padding:10px 12px">Barang baru, belum ada di daftar.</div>';
+    list.innerHTML = hasil.map(b => { const src = fotoUrl(b.foto, 80), hj = angka(b.harga_jual); return `<button type="button" data-barang="${esc(b.id)}"><span class="foto-kecil ${src ? "" : "kosong"}">${src ? `<img src="${esc(src)}" alt="" loading="lazy">` : "📷"}</span><span class="nm">${esc(b.nama)}</span><span class="${hj ? "" : "muted"} small">${hj ? rp(hj) : "belum ada harga"}</span></button>`; }).join("") || '<div class="small muted" style="padding:10px 12px">Barang baru, belum ada di daftar.</div>';
     list.classList.remove("hidden");
   }
 

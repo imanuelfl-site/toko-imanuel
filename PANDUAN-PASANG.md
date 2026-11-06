@@ -19,7 +19,7 @@ Langkah 1–4 dikerjakan sekali saja, kira-kira 20 menit.
 1. Buka [drive.google.com](https://drive.google.com) dengan akun Google toko.
 2. Unggah file `data-keluaran/toko-imanuel-database.xlsx` (ada di folder `toko imanuel` di komputer).
 3. Klik kanan file itu, pilih **Buka dengan → Google Spreadsheet**.
-4. Di Google Sheets pilih **File → Simpan sebagai Google Spreadsheet**. Beri nama `Toko Imanuel – Database`.
+4. Di Google Sheets pilih **File → Simpan sebagai Google Spreadsheet**. Beri nama `toko-imanuel-database` dan simpan di folder **Data-keluaran** di Google Drive.
 5. Hapus file `.xlsx` yang tadi diunggah, supaya tidak tertukar.
 
 Periksa: ada 14 tab di bawah (pengguna, kategori, dompet, … transaksi, …). Tab `transaksi` berisi ±1.490 baris dari catatan uang 2025–2026.
@@ -70,19 +70,28 @@ Lupa password? Ketik password baru lagi di kolom **password_baru**, lalu masuk d
 3. **Hari pertama, lakukan Tutup buku** (Laporan → Tutup buku): hitung uang di laci dan isi saldo asli setiap dompet, termasuk Fastpay. Saldo dari data lama tidak akurat karena dulu saldo digabung jadi satu, dan tutup buku pertama menyamakannya dengan saldo asli.
 4. Setiap hari: catat uang keluar/masuk saat terjadi, dan isi **Tutup toko** saat toko tutup.
 5. Setiap belanja dari supplier: isi **Nota belanja**.
-6. Akhir bulan: **Tutup buku**.
+6. Akhir bulan: **Tutup buku** untuk semua dompet sekaligus, atau ubah saldo satu dompet di **Laporan → Data induk → Dompet**. Keduanya mencatat selisihnya sebagai penyesuaian.
 
 ## Memperbarui server setelah ada perubahan
 
 Kalau Claude mengubah `apps-script/Code.gs`:
 
 1. Buka Apps Script, ganti isi `Code.gs` dengan versi baru, Simpan.
-2. **Hanya sekali, untuk foto barang:** di bilah atas editor, pilih fungsi `izinkanFoto` lalu klik **Jalankan**. Google meminta izin baru untuk Google Drive. Pilih akun Anda → **Lanjutan → Buka Toko Imanuel (tidak aman)** → **Izinkan**. Folder **Toko Imanuel - Foto barang** akan muncul di Google Drive Anda.
+2. **Untuk foto barang:** di bilah atas editor, pilih fungsi `izinkanFoto` lalu klik **Jalankan**. Kalau Google meminta izin Google Drive, pilih akun Anda → **Lanjutan → Buka Toko Imanuel (tidak aman)** → **Izinkan**. Fungsi ini memastikan folder **Toko Imanuel - Foto barang** ada di folder yang sama dengan file database. Kalau belum, folder itu dipindahkan ke sana. Lokasinya tertulis di **Log eksekusi**.
 3. **Terapkan → Kelola deployment → ikon pensil → Versi: Versi baru → Terapkan**.
 
 Alamat `/exec` tetap sama, jadi web tidak perlu diubah.
 
-Foto barang disimpan di folder Drive tadi dengan akses "siapa saja yang punya tautan bisa melihat", supaya bisa tampil di web. Hanya foto barang yang ada di sana, bukan data keuangan. Jangan hapus atau pindahkan folder itu.
+Susunan di Google Drive:
+
+```
+My Drive
+└── Data-keluaran
+    ├── toko-imanuel-database      (Google Sheets: database + Apps Script)
+    └── Toko Imanuel - Foto barang (foto barang)
+```
+
+Server mengenali folder foto dari ID-nya, jadi folder Data-keluaran boleh dipindah atau diganti nama. Jangan hapus folder foto. Foto barang disimpan dengan akses "siapa saja yang punya tautan bisa melihat", supaya bisa tampil di web. Hanya foto barang yang ada di sana, bukan data keuangan.
 
 Kolom baru di tab `barang` (satuan_2, isi_2, … , foto) ditambahkan otomatis oleh server saat pertama kali menyimpan barang. Kolom lama `kelompok` dan tab `kelompok` tidak dipakai lagi dan boleh dibiarkan.
 

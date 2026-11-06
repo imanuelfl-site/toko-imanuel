@@ -6,6 +6,11 @@ export const hariIni = (d = new Date()) => `${bulanIni(d)}-${String(d.getDate())
 export const geserBulan = (b, n) => { const [y, m] = b.split("-").map(Number); const d = new Date(y, m - 1 + n, 1); return bulanIni(d); };
 export const akhirBulan = b => { const [y, m] = b.split("-").map(Number); return `${b}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`; };
 export const jumlahHari = b => +akhirBulan(b).slice(8);
+const keTgl = s => { const [y, m, d] = String(s).split("-").map(Number); return new Date(y, m - 1, d); };
+export const geserHari = (tgl, n) => { const d = keTgl(tgl); d.setDate(d.getDate() + n); return hariIni(d); };
+// Minggu dimulai hari Senin.
+export const awalMinggu = tgl => geserHari(tgl, -((keTgl(tgl).getDay() + 6) % 7));
+export const namaHari = tgl => ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][keTgl(tgl).getDay()];
 
 export function indeks(state) {
   const kat = new Map(state.kategori.map(k => [k.id, k]));
@@ -37,17 +42,26 @@ export function saldoDompet(state, sampai = "9999-12-31") {
   return s;
 }
 
-// Ringkasan satu bulan: laba kas dan aliran uang toko <-> pribadi.
+// Ringkasan satu bulan: laba kas dan aliran uang toko <-> pribadi. r.hari berkunci tanggal "01".."31".
 export function ringkasBulan(state, bulan, ix = indeks(state)) {
+  const r = ringkasRentang(state, bulan + "-01", akhirBulan(bulan), ix);
+  r.bulan = bulan;
+  r.hari = Object.fromEntries(Object.entries(r.hari).map(([t, v]) => [t.slice(8, 10), v]));
+  return r;
+}
+
+// Ringkasan rentang tanggal dari..sampai (termasuk keduanya). r.hari berkunci tanggal lengkap.
+export function ringkasRentang(state, dari, sampai, ix = indeks(state)) {
   const r = {
-    bulan, penjualan: 0, pendapatan: 0, pendapatanPer: {}, belanja: 0, layanan: 0, biaya: 0, biayaPer: {},
+    dari, sampai, penjualan: 0, pendapatan: 0, pendapatanPer: {}, belanja: 0, layanan: 0, biaya: 0, biayaPer: {},
     prive: 0, privePer: {}, setoran: 0, setoranPer: {}, pinjaman: 0, cicilan: 0, modal: 0,
     hari: {}, jumlahTransaksi: 0, hariBuka: 0
   };
   const tambah = (obj, k, n) => { obj[k] = (obj[k] || 0) + n; };
   const pemilik = id => (ix.dom.get(id) || {}).pemilik || "toko";
   for (const t of state.transaksi) {
-    if (!aktif(t) || !t.tanggal || t.tanggal.slice(0, 7) !== bulan) continue;
+    const tg = String(t.tanggal || "").slice(0, 10);
+    if (!aktif(t) || !tg || tg < dari || tg > sampai) continue;
     const n = angka(t.nominal);
     r.jumlahTransaksi++;
     if (t.jenis === "pindah") {
@@ -60,7 +74,7 @@ export function ringkasBulan(state, bulan, ix = indeks(state)) {
     if (k.peran === "penyesuaian") continue;
     const milik = pemilik(t.dompet);
     if (k.pos === "toko") {
-      if (k.peran === "penjualan") { r.penjualan += n; tambah(r.hari, t.tanggal.slice(8, 10), n); }
+      if (k.peran === "penjualan") { r.penjualan += n; tambah(r.hari, tg, n); }
       else if (k.peran === "pendapatan") { r.pendapatan += n; tambah(r.pendapatanPer, k.nama, n); }
       else if (k.peran === "belanja") r.belanja += n;
       else if (k.peran === "layanan") r.layanan += n;

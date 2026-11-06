@@ -25,9 +25,20 @@ function tiruanGoogle(awal) {
   });
   const props = {};
   const drive = { folder: [], file: [] };
+  const iter = arr => { let i = 0; return { hasNext: () => i < arr.length, next: () => arr[i++] }; };
+  const buatFolder = (nama, induk) => {
+    const f = { id: "F" + drive.folder.length, nama, induk, getId() { return this.id; }, getName() { return this.nama; }, isTrashed: () => false, getUrl: () => "url",
+      getParents() { return iter(drive.folder.filter(x => x.id === this.induk)); }, moveTo(t) { this.induk = t.id; },
+      getFoldersByName(n) { return iter(drive.folder.filter(x => x.induk === this.id && x.nama === n)); },
+      createFolder(n) { return buatFolder(n, this.id); },
+      createFile: blob => { const file = { id: "D" + drive.file.length, blob, folder: f.id, getId() { return this.id; }, setSharing(a, p) { file.berbagi = a + ":" + p; } }; drive.file.push(file); return file; } };
+    drive.folder.push(f); return f;
+  };
+  const akar = buatFolder("My Drive", null), dataKeluaran = buatFolder("Data-keluaran", akar.id);
+  drive.akar = akar; drive.dataKeluaran = dataKeluaran;
   const b64 = buf => Buffer.from(buf).toString("base64");
   const g = {
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: n => (sheets[n] ? sheet(n) : null), insertSheet: n => { sheets[n] = []; return sheet(n); } }), flush() {} },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getId: () => "SS", getSheetByName: n => (sheets[n] ? sheet(n) : null), insertSheet: n => { sheets[n] = []; return sheet(n); } }), flush() {} },
     ContentService: { createTextOutput: s => ({ setMimeType() { return s; } }), MimeType: { JSON: "json" } },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => (props[k] = v) }) },
@@ -35,8 +46,10 @@ function tiruanGoogle(awal) {
     Logger: { log() {} },
     DriveApp: {
       Access: { ANYONE_WITH_LINK: "link" }, Permission: { VIEW: "view" },
-      createFolder: nama => { const f = { id: "F" + drive.folder.length, nama, getId() { return this.id; }, isTrashed: () => false, getUrl: () => "url", createFile: blob => { const file = { id: "D" + drive.file.length, blob, getId() { return this.id; }, setSharing(a, p) { file.berbagi = a + ":" + p; } }; drive.file.push(file); return file; } }; drive.folder.push(f); return f; },
-      getFolderById: id => drive.folder.find(f => f.id === id)
+      createFolder: nama => buatFolder(nama, akar.id),
+      getRootFolder: () => akar,
+      getFolderById: id => { const f = drive.folder.find(x => x.id === id); if (!f) throw new Error("tidak ada"); return f; },
+      getFileById: id => ({ getParents: () => iter(id === "SS" ? [dataKeluaran] : []) })
     },
     Utilities: {
       getUuid: () => crypto.randomUUID(),
@@ -60,7 +73,7 @@ function muatServer(awal) {
   const ctx = vm.createContext({ ...g, console, Date, JSON, Math, String, Object, Number });
   vm.runInContext(fs.readFileSync(new URL("../apps-script/Code.gs", import.meta.url), "utf8"), ctx);
   const post = body => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }));
-  return { post, sheets, drive };
+  return { post, sheets, drive, ctx };
 }
 
 const awal = () => ({
@@ -120,7 +133,10 @@ test("unggah foto ke Drive", () => {
   const r1 = post({ aksi: "unggahFoto", token: l.token, data: { nama: "Kompor HOCK 16/2", mime: "image/jpeg", data } });
   assert.equal(r1.ok, true, r1.pesan);
   const r2 = post({ aksi: "unggahFoto", token: l.token, data: { nama: "Panci", mime: "text/html", data } });
-  assert.equal(drive.folder.length, 1, "satu folder dipakai ulang");
+  const fotoF = drive.folder.filter(f => f.nama === "Toko Imanuel - Foto barang");
+  assert.equal(fotoF.length, 1, "satu folder dipakai ulang");
+  assert.equal(fotoF[0].induk, drive.dataKeluaran.id, "folder foto di samping database (Data-keluaran)");
+  assert.equal(drive.file[1].folder, fotoF[0].id);
   assert.equal(drive.file.length, 2);
   assert.equal(drive.file[0].getId(), r1.id);
   assert.equal(drive.file[0].blob.nama, "Kompor HOCK 16 2.jpg", "nama file aman");
@@ -128,6 +144,24 @@ test("unggah foto ke Drive", () => {
   assert.equal(drive.file[0].berbagi, "link:view");
   assert.equal(post({ aksi: "unggahFoto", token: l.token, data: {} }).ok, false, "foto kosong ditolak");
   assert.ok(r2.ok);
+});
+
+test("folder foto mengikuti folder database", () => {
+  // Folder sudah ada di Data-keluaran tapi ID belum tercatat: dipakai lagi, tidak dobel.
+  const a = muatServer(awal());
+  const ada = a.drive.dataKeluaran.createFolder("Toko Imanuel - Foto barang");
+  const l = a.post({ aksi: "login", data: { username: "imanuel", password: "rahasia-uji" } });
+  assert.ok(a.post({ aksi: "unggahFoto", token: l.token, data: { nama: "x", data: "eA==" } }).ok);
+  assert.equal(a.drive.folder.filter(f => f.nama === "Toko Imanuel - Foto barang").length, 1);
+  assert.equal(a.drive.file[0].folder, ada.id);
+  // Folder lama di My Drive (dibuat versi sebelumnya): izinkanFoto memindahkannya ke Data-keluaran.
+  const b = muatServer(awal());
+  const lama = b.drive.akar.createFolder("Toko Imanuel - Foto barang");
+  b.ctx.PropertiesService.getScriptProperties().setProperty("FOLDER_FOTO", lama.id);
+  const hasil = b.ctx.izinkanFoto();
+  assert.equal(hasil.dipindah, true);
+  assert.equal(lama.induk, b.drive.dataKeluaran.id);
+  assert.equal(b.ctx.izinkanFoto().dipindah, false, "kedua kali tidak dipindah lagi");
 });
 
 test("kolom baru barang ditambahkan ke sheet lama", () => {
